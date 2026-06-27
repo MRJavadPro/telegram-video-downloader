@@ -14,9 +14,7 @@ YTDLP_COMMON_ARGS = [
     "--no-check-certificates",
     "--extractor-retries", "3",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "--referer", "https://www.pornhub.com/",
     "--add-header", "Accept-Language:en-US,en;q=0.9",
-    "--extractor-args", "pornhub:skip_hls=True",
 ]
 
 
@@ -29,6 +27,17 @@ class VideoDownloader:
             r'https?://(?:www\.)?pornhub\.com/view_video\.php\?viewkey=[\w]+',
             r'https?://(?:www\.)?pornhub\.com/watch/[\w]+',
             r'https?://(?:www\.)?pornhub\.com/embed/[\w]+',
+            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w\-]+',
+            r'https?://youtu\.be/[\w\-]+',
+            r'https?://(?:www\.)?youtube\.com/shorts/[\w\-]+',
+            r'https?://(?:www\.)?instagram\.com/reel/[\w\-]+',
+            r'https?://(?:www\.)?instagram\.com/p/[\w\-]+',
+            r'https?://(?:www\.)?tiktok\.com/@[\w.]+/video/\d+',
+            r'https?://(?:vm|vt)\.tiktok\.com/[\w]+',
+            r'https?://(?:www\.)?twitter\.com/\w+/status/\d+',
+            r'https?://(?:www\.)?x\.com/\w+/status/\d+',
+            r'https?://(?:www\.)?facebook\.com/.+/videos/\d+',
+            r'https?://v\.redd\.it/[\w]+',
         ]
         return any(re.match(p, url) for p in patterns)
 
