@@ -368,8 +368,7 @@ async def handle_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        await update.message.reply_text("❌ An error occurred. Please try again.")
+    pass
 
 
 # ─── ADMIN HANDLERS ───
