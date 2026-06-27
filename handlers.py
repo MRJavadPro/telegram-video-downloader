@@ -158,7 +158,40 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         text_content = content.decode("utf-8", errors="ignore")
-        if "netscape" in text_content.lower() or "\t" in text_content:
+
+        lines = text_content.strip().split("\n")
+        has_netscape_header = any("netscape" in l.lower() for l in lines[:5])
+        has_tab_separated = any("\t" in l and not l.startswith("#") for l in lines)
+        has_json = text_content.strip().startswith("[") or text_content.strip().startswith("{")
+
+        if has_json:
+            try:
+                import json
+                cookies = json.loads(text_content)
+                if isinstance(cookies, list):
+                    out_lines = ["# Netscape HTTP Cookie File", ""]
+                    domains = set()
+                    for c in cookies:
+                        domain = c.get("domain", "")
+                        if not domain:
+                            continue
+                        domains.add(domain.lower().lstrip("."))
+                        path = c.get("path", "/")
+                        secure = "TRUE" if c.get("secure", False) else "FALSE"
+                        expires = str(int(c.get("expirationDate", 0)))
+                        name = c.get("name", "")
+                        value = c.get("value", "")
+                        include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
+                        out_lines.append(f"{domain}\t{include_subdomains}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
+                    text_content = "\n".join(out_lines)
+                    has_tab_separated = True
+            except json.JSONDecodeError:
+                pass
+
+        if has_tab_separated:
+            if not has_netscape_header:
+                text_content = "# Netscape HTTP Cookie File\n" + text_content
+
             existing = ""
             if os.path.exists(COOKIES_PATH):
                 with open(COOKIES_PATH, "r", encoding="utf-8") as f:
@@ -169,13 +202,13 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if line.strip() and not line.startswith("#"):
                     parts = line.split("\t")
                     if len(parts) >= 5:
-                        domains.add(parts[0].lower())
+                        domains.add(parts[0].lower().lstrip("."))
 
             merged_lines = []
             for line in existing.split("\n"):
                 if line.strip() and not line.startswith("#"):
                     parts = line.split("\t")
-                    if len(parts) >= 5 and parts[0].lower() not in domains:
+                    if len(parts) >= 5 and parts[0].lower().lstrip(".") not in domains:
                         merged_lines.append(line)
                 else:
                     merged_lines.append(line)
@@ -197,7 +230,11 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         else:
             await update.message.reply_text(
-                "❌ Invalid cookies file. Send a valid Netscape cookies.txt.",
+                "❌ Invalid cookies file.\n\n"
+                "Make sure to export using:\n"
+                '- "Get cookies.txt LOCALLY"\n'
+                "  extension (Chrome/Firefox)\n\n"
+                "The file must be .txt format.",
                 parse_mode=ParseMode.HTML
             )
     except Exception as e:
