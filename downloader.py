@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import shutil
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 
 YTDLP_COMMON_ARGS = [
@@ -21,13 +22,16 @@ YTDLP_COMMON_ARGS = [
 COOKIES_PATH = os.getenv("COOKIES_PATH", "/tmp/cookies.txt")
 
 
+def is_spotify_url(url: str) -> bool:
+    return bool(re.match(r'https?://open\.spotify\.com/(track|album|playlist)/[\w]+', url))
+
+
 class VideoDownloader:
     def __init__(self, timeout: int = 300):
         self.timeout = timeout
 
     def is_valid_url(self, url: str) -> bool:
         try:
-            from urllib.parse import urlparse
             parsed = urlparse(url)
             return parsed.scheme in ("http", "https") and bool(parsed.netloc)
         except Exception:
@@ -70,6 +74,86 @@ class VideoDownloader:
             if proc:
                 proc.kill()
             return None
+
+    def _run_spotdl(self, url: str, output_dir: str) -> Tuple[bool, str, str]:
+        cmd = [
+            sys.executable, "-m", "spotdl",
+            "download", url,
+            "--output", output_dir,
+            "--format", "mp3",
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout
+            )
+            return result.returncode == 0, result.stdout, result.stderr
+        except subprocess.TimeoutExpired:
+            return False, "", "Timeout"
+
+    def get_spotify_info(self, url: str) -> Optional[dict]:
+        cmd = [
+            sys.executable, "-m", "spotdl",
+            "save", url,
+            "--format", "json",
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if result.returncode != 0:
+                print(f"[spotdl error] {result.stderr[:500]}", flush=True)
+                return None
+
+            output = result.stdout.strip()
+            if not output:
+                return None
+
+            tracks = json.loads(output)
+            if not tracks:
+                return None
+
+            track = tracks[0] if isinstance(tracks, list) else tracks
+            return {
+                "title": track.get("name", "Unknown"),
+                "artist": track.get("artist", "Unknown"),
+                "album": track.get("album_name", "Unknown"),
+                "duration": track.get("duration", 0),
+                "thumbnail": track.get("cover_url", ""),
+                "url": url,
+                "is_spotify": True,
+            }
+        except Exception as e:
+            print(f"[spotify error] {e}", flush=True)
+            return None
+
+    def download_spotify(self, url: str) -> Optional[io.BytesIO]:
+        temp_dir = tempfile.mkdtemp()
+        ok, stdout, stderr = self._run_spotdl(url, temp_dir)
+
+        if not ok:
+            print(f"[spotdl error] {stderr[:500]}", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+
+        for root, dirs, files in os.walk(temp_dir):
+            for f in files:
+                if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
+                    file_path = os.path.join(root, f)
+                    with open(file_path, "rb") as fp:
+                        data = fp.read()
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    buf = io.BytesIO(data)
+                    buf.seek(0)
+                    return buf
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
         ok, stdout, stderr = self._run_ytdlp([
