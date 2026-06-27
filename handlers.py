@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from downloader import VideoDownloader
+from downloader import VideoDownloader, COOKIES_PATH
 from database import db
 
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "52428800"))
@@ -55,6 +55,14 @@ def progress_bar(percent: float, length: int = 12) -> str:
     return f"[{bar}] {percent:.0f}%"
 
 
+SITES_TEXT = (
+    "  YouTube, TikTok, Instagram, Twitter/X\n"
+    "  Facebook, Reddit, Vimeo, Dailymotion\n"
+    "  Twitch, SoundCloud, Pinterest\n"
+    "  And 1000+ more sites via yt-dlp"
+)
+
+
 # ─── USER HANDLERS ───
 
 
@@ -73,15 +81,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  ✨ <b>Fast • Free • High Quality</b> ✨\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"  👤 Welcome, <b>{user.first_name}</b>!\n\n"
-        "  📩 Send me a video link and I'll\n"
+        "  📩 Send me any video link and I'll\n"
         "  fetch all available qualities\n"
         "  for you to choose from.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  🌐 <b>Supported:</b> Pornhub\n"
+        f"  🌐 <b>Supported Sites:</b>\n{SITES_TEXT}\n\n"
         "  ⚡ <b>Speed:</b> Multi-threaded\n"
         "  🎯 <b>Quality:</b> Up to 4K\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  💡 <b>Tip:</b> Just paste a link!"
+        "  💡 <b>Tip:</b> Just paste any link!"
     )
 
     buttons = []
@@ -100,6 +108,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    cookies_status = "✅ Uploaded" if os.path.exists(COOKIES_PATH) else "❌ Not uploaded"
     text = (
         "┌─────────────────────────────┐\n"
         "│       ❓  <b>HOW TO USE</b>       │\n"
@@ -109,17 +118,83 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  <b>Step 3:</b> Pick quality\n"
         "  <b>Step 4:</b> Wait for download\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  📌 <b>Supported URL formats:</b>\n"
-        "  • <code>pornhub.com/view_video.php?viewkey=...</code>\n"
-        "  • <code>pornhub.com/watch/...</code>\n"
-        "  • <code>pornhub.com/embed/...</code>\n\n"
+        f"  🍪 <b>Cookies:</b> {cookies_status}\n\n"
+        "  📌 <b>Supported sites:</b>\n"
+        f"  {SITES_TEXT}\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  ⚠️ <b>Note:</b> Some videos may be\n"
-        "  geo-restricted or private.\n\n"
-        "  🚀 <b>Powered by multi-threaded</b>\n"
-        "  <b>download engine</b>"
+        "  🍪 <b>For age-restricted sites</b>\n"
+        "  (Pornhub, etc.), send /cookies\n"
+        "  with a Netscape cookies.txt file.\n\n"
+        "  🚀 <b>Powered by yt-dlp</b>"
     )
     await query.edit_message_text(text, parse_mode=ParseMode.HTML)
+
+
+async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user.id):
+        await update.message.reply_text("🚫 Only admin can upload cookies.")
+        return
+
+    await update.message.reply_text(
+        "┌─────────────────────────────┐\n"
+        "│    🍪  <b>UPLOAD COOKIES</b>      │\n"
+        "└─────────────────────────────┘\n\n"
+        "  Send a <b>Netscape cookies.txt</b>\n"
+        "  file to enable age-restricted\n"
+        "  site downloads.\n\n"
+        "  <b>How to get cookies.txt:</b>\n"
+        "  1. Install the browser extension\n"
+        "     \"Get cookies.txt LOCALLY\"\n"
+        "  2. Visit the site (e.g. pornhub)\n"
+        "  3. Click the extension → Export\n"
+        "  4. Send the .txt file here\n\n"
+        "  ⚠️ Send /skip to cancel.",
+        parse_mode=ParseMode.HTML
+    )
+    context.user_data["awaiting_cookies"] = True
+
+
+async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_cookies"):
+        return False
+
+    context.user_data["awaiting_cookies"] = False
+
+    if update.message.text and update.message.text.strip() == "/skip":
+        await update.message.reply_text("❌ Cookie upload cancelled.")
+        return True
+
+    if not update.message.document:
+        await update.message.reply_text("❌ Please send a .txt file.")
+        return True
+
+    file = await update.message.document.get_file()
+    content = await file.download_as_bytearray()
+
+    try:
+        text_content = content.decode("utf-8", errors="ignore")
+        if "netscape" in text_content.lower() or "\t" in text_content:
+            with open(COOKIES_PATH, "w", encoding="utf-8") as f:
+                f.write(text_content)
+            await update.message.reply_text(
+                "┌─────────────────────────────┐\n"
+                "│    ✅  <b>COOKIES UPLOADED</b>    │\n"
+                "└─────────────────────────────┘\n\n"
+                "  🍪 Age-restricted sites are\n"
+                "  now enabled!\n\n"
+                "  Send a video link to test.",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Invalid cookies file. Please send a valid Netscape cookies.txt.",
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    return True
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,8 +214,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "│    ❌  <b>INVALID URL</b>         │\n"
             "└─────────────────────────────┘\n\n"
             "  Please send a valid video link.\n\n"
-            "  <b>Expected format:</b>\n"
-            "  <code>https://www.pornhub.com/view_video.php?viewkey=...</code>",
+            f"  🌐 <b>Supported sites:</b>\n  {SITES_TEXT}",
             parse_mode=ParseMode.HTML
         )
         return
@@ -165,8 +239,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "  <b>Possible reasons:</b>\n"
             "  • Video is private or deleted\n"
             "  • Geo-restricted content\n"
-            "  • Age-restricted (needs cookies)\n\n"
-            "  💡 Try a different video link.",
+            "  • Age-restricted (needs cookies)\n"
+            "  • Site blocking server requests\n\n"
+            "  💡 <b>For age-restricted sites:</b>\n"
+            "  Admin can upload cookies via /cookies",
             parse_mode=ParseMode.HTML
         )
         return
@@ -678,11 +754,11 @@ async def admin_back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  ✨ <b>Fast • Free • High Quality</b> ✨\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"  👤 Welcome, <b>{user.first_name}</b>!\n\n"
-        "  📩 Send me a video link and I'll\n"
+        "  📩 Send me any video link and I'll\n"
         "  fetch all available qualities\n"
         "  for you to choose from.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  🌐 <b>Supported:</b> Pornhub\n"
+        f"  🌐 <b>Supported Sites:</b>\n{SITES_TEXT}\n\n"
         "  ⚡ <b>Speed:</b> Multi-threaded\n"
         "  🎯 <b>Quality:</b> Up to 4K\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

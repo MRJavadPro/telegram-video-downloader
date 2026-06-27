@@ -23,6 +23,8 @@ from handlers import (
     handle_stats,
     handle_error,
     help_callback,
+    cookies_command,
+    handle_cookies_file,
     admin_menu,
     admin_users,
     admin_daily,
@@ -41,7 +43,14 @@ load_dotenv()
 async def route_text(update, context):
     if await admin_handle_search(update, context):
         return
+    if await handle_cookies_file(update, context):
+        return
     await handle_message(update, context)
+
+
+async def route_document(update, context):
+    if await handle_cookies_file(update, context):
+        return
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
@@ -54,6 +63,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("cookies", cookies_command))
+    app.add_handler(MessageHandler(filters.Document.ALL, route_document))
 
     app.add_handler(CallbackQueryHandler(help_callback, pattern=r"^help_msg$"))
     app.add_handler(CallbackQueryHandler(handle_stats, pattern=r"^stats_"))

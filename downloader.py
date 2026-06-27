@@ -17,32 +17,28 @@ YTDLP_COMMON_ARGS = [
     "--add-header", "Accept-Language:en-US,en;q=0.9",
 ]
 
+COOKIES_PATH = os.getenv("COOKIES_PATH", "/tmp/cookies.txt")
+
 
 class VideoDownloader:
     def __init__(self, timeout: int = 300):
         self.timeout = timeout
 
     def is_valid_url(self, url: str) -> bool:
-        patterns = [
-            r'https?://(?:www\.)?pornhub\.com/view_video\.php\?viewkey=[\w]+',
-            r'https?://(?:www\.)?pornhub\.com/watch/[\w]+',
-            r'https?://(?:www\.)?pornhub\.com/embed/[\w]+',
-            r'https?://(?:www\.)?youtube\.com/watch\?v=[\w\-]+',
-            r'https?://youtu\.be/[\w\-]+',
-            r'https?://(?:www\.)?youtube\.com/shorts/[\w\-]+',
-            r'https?://(?:www\.)?instagram\.com/reel/[\w\-]+',
-            r'https?://(?:www\.)?instagram\.com/p/[\w\-]+',
-            r'https?://(?:www\.)?tiktok\.com/@[\w.]+/video/\d+',
-            r'https?://(?:vm|vt)\.tiktok\.com/[\w]+',
-            r'https?://(?:www\.)?twitter\.com/\w+/status/\d+',
-            r'https?://(?:www\.)?x\.com/\w+/status/\d+',
-            r'https?://(?:www\.)?facebook\.com/.+/videos/\d+',
-            r'https?://v\.redd\.it/[\w]+',
-        ]
-        return any(re.match(p, url) for p in patterns)
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+        except Exception:
+            return False
+
+    def _get_cookies_args(self) -> list:
+        if os.path.exists(COOKIES_PATH):
+            return ["--cookies", COOKIES_PATH]
+        return []
 
     def _run_ytdlp(self, args: list, timeout: int = 60) -> Tuple[bool, str, str]:
-        cmd = [sys.executable, "-m", "yt_dlp"] + args
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
         try:
             result = subprocess.run(
                 cmd,
@@ -55,15 +51,15 @@ class VideoDownloader:
             return False, "", "Timeout"
 
     def _run_ytdlp_stream(self, args: list, timeout: int = 300) -> Optional[io.BytesIO]:
-        cmd = [sys.executable, "-m", "yt_dlp"] + args
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.PIPE
             )
-            data = proc.stdout.read()
-            proc.wait(timeout=timeout)
+            data, stderr = proc.communicate(timeout=timeout)
             if proc.returncode != 0 or not data:
                 return None
             buf = io.BytesIO(data)
@@ -75,12 +71,13 @@ class VideoDownloader:
             return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
-        ok, stdout, _ = self._run_ytdlp([
+        ok, stdout, stderr = self._run_ytdlp([
             "--no-download",
             "--print-json",
         ] + YTDLP_COMMON_ARGS + [url], timeout=60)
 
         if not ok:
+            print(f"[yt-dlp error] {stderr[:500]}", flush=True)
             return None
 
         try:
@@ -94,7 +91,8 @@ class VideoDownloader:
                 "formats": info.get("formats", []),
                 "url": url
             }
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[parse error] {e}", flush=True)
             return None
 
     def get_quality_options(self, formats: list) -> list:
@@ -145,34 +143,6 @@ class VideoDownloader:
         ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
 
         return stream
-
-    def download_video_to_temp(self, url: str, format_id: str) -> Optional[str]:
-        temp_dir = tempfile.mkdtemp()
-        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
-
-        ok, _, _ = self._run_ytdlp([
-            "-f", f"{format_id}+bestaudio/best",
-            "--merge-output-format", "mp4",
-            "-o", output_template,
-            "--socket-timeout", "15",
-            "--retries", "5",
-            "--fragment-retries", "10",
-            "--concurrent-fragments", "4",
-            "--http-chunk-size", "1048576",
-            "--buffer-size", "16K",
-        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
-
-        if not ok:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return None
-
-        for file in os.listdir(temp_dir):
-            file_path = os.path.join(temp_dir, file)
-            if os.path.isfile(file_path):
-                return file_path
-
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return None
 
     def cleanup(self, file_path: str):
         if file_path and os.path.exists(file_path):
