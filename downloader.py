@@ -26,6 +26,10 @@ def is_spotify_url(url: str) -> bool:
     return bool(re.match(r'https?://open\.spotify\.com/(track|album|playlist)/[\w]+', url))
 
 
+def is_soundcloud_url(url: str) -> bool:
+    return bool(re.match(r'https?://(?:www\.)?soundcloud\.com/[\w\-]+/[\w\-]+', url))
+
+
 class VideoDownloader:
     def __init__(self, timeout: int = 300):
         self.timeout = timeout
@@ -227,6 +231,17 @@ class VideoDownloader:
                     break
 
         return options[:8]
+
+    def download_soundcloud(self, url: str) -> Optional[io.BytesIO]:
+        stream = self._run_ytdlp_stream([
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "-o", "-",
+            "--no-playlist",
+        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
+        return stream
 
     def download_video(self, url: str, format_id: str) -> Optional[io.BytesIO]:
         stream = self._run_ytdlp_stream([

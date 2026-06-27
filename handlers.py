@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from downloader import VideoDownloader, COOKIES_PATH, is_spotify_url
+from downloader import VideoDownloader, COOKIES_PATH, is_spotify_url, is_soundcloud_url
 from database import db
 
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "52428800"))
@@ -291,6 +291,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info = downloader.get_spotify_info(url)
         title = info.get("title", "Spotify Track") if info else "Spotify Track"
         artist = info.get("artist", "Unknown") if info else "Unknown"
+
+        db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
+
+        try:
+            audio_stream.seek(0)
+            await context.bot.send_audio(
+                chat_id=chat_id,
+                audio=audio_stream,
+                title=title,
+                performer=artist,
+                caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
+                parse_mode=ParseMode.HTML,
+                read_timeout=DOWNLOAD_TIMEOUT,
+                write_timeout=DOWNLOAD_TIMEOUT
+            )
+        except Exception as e:
+            await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
+        finally:
+            audio_stream.close()
+        return
+
+    if is_soundcloud_url(url):
+        chat_id = message.chat_id
+        await loading.edit_text(
+            "🎵 SoundCloud Track\n\n"
+            "⬇️ Downloading audio..."
+        )
+
+        start_time = time.time()
+        audio_stream = downloader.download_soundcloud(url)
+        elapsed = time.time() - start_time
+
+        if not audio_stream:
+            await loading.edit_text(
+                "❌ Download Failed\n\n"
+                "Could not download SoundCloud track.\n"
+                "The link may be invalid or restricted."
+            )
+            return
+
+        file_size = audio_stream.getbuffer().nbytes
+        info = downloader.get_video_info(url)
+        title = info.get("title", "SoundCloud Track") if info else "SoundCloud Track"
+        artist = info.get("uploader", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
