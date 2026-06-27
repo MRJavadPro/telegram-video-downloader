@@ -1,6 +1,7 @@
 import os
 import io
 import time
+import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -294,22 +295,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
+        temp_path = None
         try:
-            audio_stream.seek(0)
-            await context.bot.send_audio(
-                chat_id=chat_id,
-                audio=audio_stream,
-                title=title,
-                performer=artist,
-                caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
-                parse_mode=ParseMode.HTML,
-                read_timeout=DOWNLOAD_TIMEOUT,
-                write_timeout=DOWNLOAD_TIMEOUT
-            )
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                audio_stream.seek(0)
+                tmp.write(audio_stream.read())
+                temp_path = tmp.name
+
+            with open(temp_path, "rb") as f:
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=f,
+                    title=title,
+                    performer=artist,
+                    caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
+                    parse_mode=ParseMode.HTML,
+                    read_timeout=DOWNLOAD_TIMEOUT,
+                    write_timeout=DOWNLOAD_TIMEOUT
+                )
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
             audio_stream.close()
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
         return
 
     if is_soundcloud_url(url):
@@ -338,22 +347,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
+        temp_path = None
         try:
-            audio_stream.seek(0)
-            await context.bot.send_audio(
-                chat_id=chat_id,
-                audio=audio_stream,
-                title=title,
-                performer=artist,
-                caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
-                parse_mode=ParseMode.HTML,
-                read_timeout=DOWNLOAD_TIMEOUT,
-                write_timeout=DOWNLOAD_TIMEOUT
-            )
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                audio_stream.seek(0)
+                tmp.write(audio_stream.read())
+                temp_path = tmp.name
+
+            with open(temp_path, "rb") as f:
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=f,
+                    title=title,
+                    performer=artist,
+                    caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
+                    parse_mode=ParseMode.HTML,
+                    read_timeout=DOWNLOAD_TIMEOUT,
+                    write_timeout=DOWNLOAD_TIMEOUT
+                )
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
             audio_stream.close()
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
         return
 
     info = downloader.get_video_info(url)
@@ -476,33 +493,40 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
         f"🎯 {quality_label} • 📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s"
     )
 
+    temp_path = None
     try:
-        if file_size <= MAX_FILE_SIZE:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
             video_stream.seek(0)
-            await context.bot.send_video(
-                chat_id=chat_id,
-                video=video_stream,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                read_timeout=DOWNLOAD_TIMEOUT,
-                write_timeout=DOWNLOAD_TIMEOUT
-            )
-        else:
-            video_stream.seek(0)
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=video_stream,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                read_timeout=DOWNLOAD_TIMEOUT,
-                write_timeout=DOWNLOAD_TIMEOUT
-            )
+            tmp.write(video_stream.read())
+            temp_path = tmp.name
+
+        with open(temp_path, "rb") as f:
+            if file_size <= MAX_FILE_SIZE:
+                await context.bot.send_video(
+                    chat_id=chat_id,
+                    video=f,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    read_timeout=DOWNLOAD_TIMEOUT,
+                    write_timeout=DOWNLOAD_TIMEOUT
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    read_timeout=DOWNLOAD_TIMEOUT,
+                    write_timeout=DOWNLOAD_TIMEOUT
+                )
     except Exception as e:
         await query.message.reply_text(
             f"❌ Failed to send: {str(e)[:100]}"
         )
     finally:
         video_stream.close()
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
         if chat_id in user_data:
             del user_data[chat_id]
 
