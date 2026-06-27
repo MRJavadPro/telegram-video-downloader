@@ -27,7 +27,7 @@ def is_spotify_url(url: str) -> bool:
 
 
 def is_soundcloud_url(url: str) -> bool:
-    return bool(re.match(r'https?://(?:www\.|on\.)?soundcloud\.com/[\w\-]+/[\w\-]+', url))
+    return bool(re.match(r'https?://(?:www\.|on\.)?soundcloud\.com/[\w\-]+', url))
 
 
 class VideoDownloader:
