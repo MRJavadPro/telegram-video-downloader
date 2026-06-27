@@ -9,6 +9,17 @@ import shutil
 from typing import Optional, Tuple
 
 
+YTDLP_COMMON_ARGS = [
+    "--no-warnings",
+    "--no-check-certificates",
+    "--extractor-retries", "3",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "--referer", "https://www.pornhub.com/",
+    "--add-header", "Accept-Language:en-US,en;q=0.9",
+    "--extractor-args", "pornhub:skip_hls=True",
+]
+
+
 class VideoDownloader:
     def __init__(self, timeout: int = 300):
         self.timeout = timeout
@@ -58,11 +69,7 @@ class VideoDownloader:
         ok, stdout, _ = self._run_ytdlp([
             "--no-download",
             "--print-json",
-            "--no-warnings",
-            "--no-check-certificates",
-            "--extractor-retries", "3",
-            url
-        ], timeout=60)
+        ] + YTDLP_COMMON_ARGS + [url], timeout=60)
 
         if not ok:
             return None
@@ -120,17 +127,13 @@ class VideoDownloader:
             "-f", f"{format_id}+bestaudio/best",
             "--merge-output-format", "mp4",
             "-o", "-",
-            "--no-warnings",
-            "--no-check-certificates",
             "--socket-timeout", "15",
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--http-chunk-size", "1048576",
-            "--extractor-retries", "3",
             "--buffer-size", "16K",
-            url
-        ], timeout=self.timeout)
+        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
 
         return stream
 
@@ -142,17 +145,13 @@ class VideoDownloader:
             "-f", f"{format_id}+bestaudio/best",
             "--merge-output-format", "mp4",
             "-o", output_template,
-            "--no-warnings",
-            "--no-check-certificates",
             "--socket-timeout", "15",
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--http-chunk-size", "1048576",
-            "--extractor-retries", "3",
             "--buffer-size", "16K",
-            url
-        ], timeout=self.timeout)
+        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
 
         if not ok:
             shutil.rmtree(temp_dir, ignore_errors=True)
