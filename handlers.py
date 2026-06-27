@@ -303,37 +303,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "view_count": info.get("view_count", 0),
     }
 
-    title = info["title"][:60]
+    title = info["title"][:50]
     duration = format_duration(info.get("duration", 0))
     views = format_number(info.get("view_count", 0))
-    uploader = info.get("uploader", "Unknown")[:30]
+    uploader = info.get("uploader", "Unknown")[:25]
 
     buttons = []
+    quality_lines = []
     for i, opt in enumerate(quality_options):
         size_str = format_size(opt.get("filesize", 0))
         emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"][i] if i < 8 else "⬇️"
         label = f"{emoji} {opt['label']}  •  ~{size_str}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"dl_{opt['format_id']}")])
+        quality_lines.append(f"  {opt['label']}  ~  {size_str}")
 
     buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{message.chat_id}")])
 
+    q_list = " | ".join(quality_lines)
+
     text = (
-        "┌─────────────────────────────┐\n"
-        "│    🎬  <b>VIDEO FOUND</b>         │\n"
-        "└─────────────────────────────┘\n\n"
-        f"  📌 <b>{title}</b>\n\n"
-        f"  👤 Uploader: <code>{uploader}</code>\n"
-        f"  ⏱ Duration: <b>{duration}</b>\n"
-        f"  👁 Views: <b>{views}</b>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  🎯 <b>Available Qualities:</b>\n"
+        f"🎬 <b>{title}</b>\n"
+        f"👤 {uploader}  •  ⏱ {duration}  •  👁 {views}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 {q_list}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👇 Pick a quality:"
     )
-
-    for opt in quality_options:
-        size_str = format_size(opt.get("filesize", 0))
-        text += f"    • <b>{opt['label']}</b>  ~  <code>{size_str}</code>\n"
-
-    text += "\n  👇 <b>Pick one below:</b>"
 
     await loading.edit_text(
         text,
