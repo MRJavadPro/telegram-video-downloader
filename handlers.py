@@ -459,6 +459,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
             break
 
     quality_label = selected_option["label"] if selected_option else "best"
+    has_audio = selected_option.get("has_audio", True) if selected_option else True
 
     await query.edit_message_text(
         f"⬇️ Downloading\n\n"
@@ -468,7 +469,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     )
 
     start_time = time.time()
-    file_path = downloader.download_video_to_file(url, format_id)
+    file_path = downloader.download_video_to_file(url, format_id, has_audio=has_audio)
     elapsed = time.time() - start_time
 
     if not file_path:

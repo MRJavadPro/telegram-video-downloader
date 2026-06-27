@@ -80,11 +80,17 @@ class VideoDownloader:
                 proc.kill()
             return None
 
-    def download_video_to_file(self, url: str, format_id: str) -> Optional[str]:
+    def download_video_to_file(self, url: str, format_id: str, has_audio: bool = True) -> Optional[str]:
         temp_dir = tempfile.mkdtemp()
         output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+
+        if has_audio:
+            fmt_str = format_id
+        else:
+            fmt_str = f"{format_id}+bestaudio/{format_id}"
+
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", f"{format_id}+bestaudio/best",
+            "-f", fmt_str,
             "--merge-output-format", "mp4",
             "-o", output_template,
             "--no-playlist",
@@ -92,10 +98,9 @@ class VideoDownloader:
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
-            "--http-chunk-size", "1048576",
-            "--buffer-size", "16K",
             "--no-progress",
         ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        print(f"[yt-dlp] downloading: {fmt_str}", flush=True)
         proc = None
         try:
             proc = subprocess.Popen(
@@ -106,18 +111,25 @@ class VideoDownloader:
             )
             stderr_lines = []
             for line in proc.stderr:
-                stderr_lines.append(line)
-                if len(stderr_lines) > 50:
-                    stderr_lines = stderr_lines[-50:]
+                stripped = line.strip()
+                if stripped:
+                    stderr_lines.append(stripped)
+                    if len(stderr_lines) > 50:
+                        stderr_lines = stderr_lines[-50:]
             proc.wait(timeout=self.timeout)
             if proc.returncode != 0:
-                print(f"[yt-dlp file error] {''.join(stderr_lines[-10:])}", flush=True)
+                print(f"[yt-dlp file error] rc={proc.returncode}", flush=True)
+                for line in stderr_lines[-10:]:
+                    print(f"  {line}", flush=True)
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
             for f in os.listdir(temp_dir):
                 fp = os.path.join(temp_dir, f)
                 if os.path.isfile(fp):
+                    size = os.path.getsize(fp)
+                    print(f"[yt-dlp] success: {f} ({size} bytes)", flush=True)
                     return fp
+            print("[yt-dlp] no output file found in temp dir", flush=True)
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except subprocess.TimeoutExpired:
@@ -242,32 +254,58 @@ class VideoDownloader:
             return None
 
     def get_quality_options(self, formats: list, duration: int = 0) -> list:
-        seen_qualities = {}
+        best_by_height = {}
         for fmt in formats:
             if fmt.get("vcodec") == "none":
                 continue
             height = fmt.get("height")
             if not height:
                 continue
+
+            acodec = fmt.get("acodec")
+            has_audio = bool(acodec and acodec != "none")
+            protocol = fmt.get("protocol", "")
+            is_direct = protocol in ("https", "http")
+
             quality_label = f"{height}p"
-            if quality_label not in seen_qualities:
-                filesize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
-                if not filesize and duration:
-                    tbr = fmt.get("tbr") or 0
-                    vbr = fmt.get("vbr") or 0
-                    abr = fmt.get("abr") or 0
-                    bitrate = tbr or (vbr + abr)
-                    if bitrate:
-                        filesize = int(bitrate * 1000 / 8 * duration)
-                seen_qualities[quality_label] = {
+
+            filesize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
+            if not filesize and duration:
+                tbr = fmt.get("tbr") or 0
+                vbr = fmt.get("vbr") or 0
+                abr = fmt.get("abr") or 0
+                bitrate = tbr or (vbr + abr)
+                if bitrate:
+                    filesize = int(bitrate * 1000 / 8 * duration)
+
+            if quality_label not in best_by_height:
+                best_by_height[quality_label] = {
                     "label": quality_label,
                     "format_id": fmt["format_id"],
                     "height": height,
                     "filesize": filesize,
                     "ext": fmt.get("ext", "mp4"),
+                    "has_audio": has_audio,
+                    "is_direct": is_direct,
                 }
+            else:
+                existing = best_by_height[quality_label]
+                prefer_direct = is_direct and not existing["is_direct"]
+                prefer_audio = has_audio and not existing["has_audio"]
+                if prefer_direct or prefer_audio:
+                    best_by_height[quality_label] = {
+                        "label": quality_label,
+                        "format_id": fmt["format_id"],
+                        "height": height,
+                        "filesize": filesize or existing["filesize"],
+                        "ext": fmt.get("ext", "mp4"),
+                        "has_audio": has_audio,
+                        "is_direct": is_direct,
+                    }
+                elif filesize and filesize > existing["filesize"]:
+                    best_by_height[quality_label]["filesize"] = filesize
 
-        options = sorted(seen_qualities.values(), key=lambda x: x["height"], reverse=True)
+        options = sorted(best_by_height.values(), key=lambda x: x["height"], reverse=True)
 
         if not options:
             for fmt in formats:
@@ -277,12 +315,15 @@ class VideoDownloader:
                         tbr = fmt.get("tbr") or 0
                         if tbr:
                             filesize = int(tbr * 1000 / 8 * duration)
+                    acodec = fmt.get("acodec")
+                    has_audio = acodec and acodec != "none"
                     options.append({
                         "label": "Best Available",
                         "format_id": fmt["format_id"],
                         "height": 0,
                         "filesize": filesize,
                         "ext": fmt.get("ext", "mp4"),
+                        "has_audio": has_audio,
                     })
                     break
 
@@ -309,10 +350,7 @@ class VideoDownloader:
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
-            "--http-chunk-size", "1048576",
-            "--buffer-size", "16K",
         ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
-
         return stream
 
     def cleanup(self, file_path: str):
