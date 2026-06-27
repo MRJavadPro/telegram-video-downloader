@@ -70,6 +70,7 @@ class VideoDownloader:
             )
             data, stderr = proc.communicate(timeout=timeout)
             if proc.returncode != 0 or not data:
+                print(f"[yt-dlp stream error] rc={proc.returncode} {stderr[:200]}", flush=True)
                 return None
             buf = io.BytesIO(data)
             buf.seek(0)
@@ -77,6 +78,42 @@ class VideoDownloader:
         except (subprocess.TimeoutExpired, Exception):
             if proc:
                 proc.kill()
+            return None
+
+    def download_video_to_file(self, url: str, format_id: str) -> Optional[str]:
+        temp_dir = tempfile.mkdtemp()
+        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
+            "-f", f"{format_id}+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "-o", output_template,
+            "--no-playlist",
+            "--socket-timeout", "15",
+            "--retries", "5",
+            "--fragment-retries", "10",
+            "--concurrent-fragments", "4",
+            "--http-chunk-size", "1048576",
+            "--buffer-size", "16K",
+        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout
+            )
+            if result.returncode != 0:
+                print(f"[yt-dlp file error] {result.stderr[:300]}", flush=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+            for f in os.listdir(temp_dir):
+                fp = os.path.join(temp_dir, f)
+                if os.path.isfile(fp):
+                    return fp
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+        except subprocess.TimeoutExpired:
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
     def _run_spotdl(self, url: str, output_dir: str) -> Tuple[bool, str, str]:

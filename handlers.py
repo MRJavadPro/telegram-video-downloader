@@ -1,7 +1,7 @@
 import os
 import io
 import time
-import tempfile
+import shutil
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -468,10 +468,10 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     )
 
     start_time = time.time()
-    video_stream = downloader.download_video(url, format_id)
+    file_path = downloader.download_video_to_file(url, format_id)
     elapsed = time.time() - start_time
 
-    if not video_stream:
+    if not file_path:
         db.log_download(chat_id, title, url, quality_label, 0, elapsed, "failed")
         await query.message.reply_text(
             "❌ Download Failed\n\n"
@@ -482,7 +482,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
             del user_data[chat_id]
         return
 
-    file_size = video_stream.getbuffer().nbytes
+    file_size = os.path.getsize(file_path)
     db.log_download(chat_id, title, url, quality_label, file_size, elapsed)
 
     caption = (
@@ -490,14 +490,8 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
         f"🎯 {quality_label} • 📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s"
     )
 
-    temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            video_stream.seek(0)
-            tmp.write(video_stream.read())
-            temp_path = tmp.name
-
-        with open(temp_path, "rb") as f:
+        with open(file_path, "rb") as f:
             if file_size <= MAX_FILE_SIZE:
                 await context.bot.send_video(
                     chat_id=chat_id,
@@ -521,9 +515,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
             f"❌ Failed to send: {str(e)[:100]}"
         )
     finally:
-        video_stream.close()
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+        shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
         if chat_id in user_data:
             del user_data[chat_id]
 
