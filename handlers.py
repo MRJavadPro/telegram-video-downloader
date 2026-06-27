@@ -183,10 +183,15 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
             merged = "\n".join(merged_lines) + "\n" + text_content
             with open(COOKIES_PATH, "w", encoding="utf-8") as f:
                 f.write(merged)
+            domain_list = sorted(domains)
+            count = len(domain_list)
+            preview = ", ".join(domain_list[:5])
+            if count > 5:
+                preview += f" +{count - 5} more"
             await update.message.reply_text(
                 f"✅ Cookies Uploaded\n\n"
-                f"Added cookies for:\n"
-                f"{', '.join(sorted(domains))}\n\n"
+                f"Added {count} domains\n"
+                f"{preview}\n\n"
                 f"Send a video link to test.",
                 parse_mode=ParseMode.HTML
             )
