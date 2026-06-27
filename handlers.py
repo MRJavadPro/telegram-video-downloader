@@ -215,8 +215,10 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
                     merged_lines.append(line)
 
             merged = "\n".join(merged_lines) + "\n" + text_content
+            os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
             with open(COOKIES_PATH, "w", encoding="utf-8") as f:
                 f.write(merged)
+            db.set_setting("cookies", merged)
             domain_list = sorted(domains)
             count = len(domain_list)
             preview = ", ".join(domain_list[:5])

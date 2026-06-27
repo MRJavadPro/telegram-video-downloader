@@ -58,7 +58,19 @@ if not TOKEN:
     sys.exit(1)
 
 
+def restore_cookies():
+    from database import db
+    from downloader import COOKIES_PATH
+    saved = db.get_setting("cookies")
+    if saved:
+        os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
+        with open(COOKIES_PATH, "w", encoding="utf-8") as f:
+            f.write(saved)
+        print(f"[cookies] Restored {len(saved)} bytes from database")
+
+
 def main():
+    restore_cookies()
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
