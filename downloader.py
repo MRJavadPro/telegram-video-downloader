@@ -94,16 +94,24 @@ class VideoDownloader:
             "--concurrent-fragments", "4",
             "--http-chunk-size", "1048576",
             "--buffer-size", "16K",
+            "--no-progress",
         ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        proc = None
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout
             )
-            if result.returncode != 0:
-                print(f"[yt-dlp file error] {result.stderr[:300]}", flush=True)
+            stderr_lines = []
+            for line in proc.stderr:
+                stderr_lines.append(line)
+                if len(stderr_lines) > 50:
+                    stderr_lines = stderr_lines[-50:]
+            proc.wait(timeout=self.timeout)
+            if proc.returncode != 0:
+                print(f"[yt-dlp file error] {''.join(stderr_lines[-10:])}", flush=True)
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
             for f in os.listdir(temp_dir):
@@ -113,6 +121,15 @@ class VideoDownloader:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except subprocess.TimeoutExpired:
+            if proc:
+                proc.kill()
+            print("[yt-dlp] download timed out", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+        except Exception as e:
+            if proc:
+                proc.kill()
+            print(f"[yt-dlp] download error: {e}", flush=True)
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
