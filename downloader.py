@@ -98,7 +98,7 @@ class VideoDownloader:
             print(f"[parse error] {e}", flush=True)
             return None
 
-    def get_quality_options(self, formats: list) -> list:
+    def get_quality_options(self, formats: list, duration: int = 0) -> list:
         seen_qualities = {}
         for fmt in formats:
             if fmt.get("vcodec") == "none":
@@ -108,11 +108,19 @@ class VideoDownloader:
                 continue
             quality_label = f"{height}p"
             if quality_label not in seen_qualities:
+                filesize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
+                if not filesize and duration:
+                    tbr = fmt.get("tbr") or 0
+                    vbr = fmt.get("vbr") or 0
+                    abr = fmt.get("abr") or 0
+                    bitrate = tbr or (vbr + abr)
+                    if bitrate:
+                        filesize = int(bitrate * 1000 / 8 * duration)
                 seen_qualities[quality_label] = {
                     "label": quality_label,
                     "format_id": fmt["format_id"],
                     "height": height,
-                    "filesize": fmt.get("filesize") or fmt.get("filesize_approx") or 0,
+                    "filesize": filesize,
                     "ext": fmt.get("ext", "mp4"),
                 }
 
@@ -121,11 +129,16 @@ class VideoDownloader:
         if not options:
             for fmt in formats:
                 if fmt.get("format_id") and fmt.get("vcodec") != "none":
+                    filesize = fmt.get("filesize") or 0
+                    if not filesize and duration:
+                        tbr = fmt.get("tbr") or 0
+                        if tbr:
+                            filesize = int(tbr * 1000 / 8 * duration)
                     options.append({
                         "label": "Best Available",
                         "format_id": fmt["format_id"],
                         "height": 0,
-                        "filesize": fmt.get("filesize") or 0,
+                        "filesize": filesize,
                         "ext": fmt.get("ext", "mp4"),
                     })
                     break

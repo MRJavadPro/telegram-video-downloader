@@ -257,7 +257,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
-    quality_options = downloader.get_quality_options(info["formats"])
+    quality_options = downloader.get_quality_options(info["formats"], info.get("duration", 0))
     if not quality_options:
         await loading.edit_text(
             "┌─────────────────────────────┐\n"
@@ -288,9 +288,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, opt in enumerate(quality_options):
         size_str = format_size(opt.get("filesize", 0))
         emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"][i] if i < 8 else "⬇️"
-        label = f"{emoji} {opt['label']}"
-        if opt.get("filesize"):
-            label += f"  •  {size_str}"
+        label = f"{emoji} {opt['label']}  •  ~{size_str}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"dl_{opt['format_id']}")])
 
     buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{message.chat_id}")])
@@ -304,8 +302,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  ⏱ Duration: <b>{duration}</b>\n"
         f"  👁 Views: <b>{views}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  🎯 <b>Select Quality:</b>\n"
+        "  🎯 <b>Available Qualities:</b>\n"
     )
+
+    for opt in quality_options:
+        size_str = format_size(opt.get("filesize", 0))
+        text += f"    • <b>{opt['label']}</b>  ~  <code>{size_str}</code>\n"
+
+    text += "\n  👇 <b>Pick one below:</b>"
 
     await loading.edit_text(
         text,
