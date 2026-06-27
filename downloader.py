@@ -164,7 +164,9 @@ class VideoDownloader:
             "--no-download",
             "--print-json",
             "--no-playlist",
-        ] + YTDLP_COMMON_ARGS + [url], timeout=90)
+            "--ignore-errors",
+            "--no-warnings",
+        ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90)
 
         if not ok:
             print(f"[yt-dlp error] {stderr[:500]}", flush=True)

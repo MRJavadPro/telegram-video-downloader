@@ -59,14 +59,24 @@ if not TOKEN:
 
 
 def restore_cookies():
-    from database import db
+    from database import Database
     from downloader import COOKIES_PATH
-    saved = db.get_setting("cookies")
+    saved = None
+    for path in ["./data/bot.db", "/tmp/bot.db"]:
+        try:
+            db = Database(path)
+            saved = db.get_setting("cookies")
+            if saved:
+                break
+        except Exception:
+            pass
     if saved:
         os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
         with open(COOKIES_PATH, "w", encoding="utf-8") as f:
             f.write(saved)
         print(f"[cookies] Restored {len(saved)} bytes from database")
+    else:
+        print("[cookies] No saved cookies found")
 
 
 def main():

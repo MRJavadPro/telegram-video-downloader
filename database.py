@@ -8,9 +8,12 @@ DB_PATH = os.getenv("DB_PATH", "./data/bot.db")
 
 
 class Database:
-    def __init__(self):
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    def __init__(self, path: str = None):
+        db_path = path or DB_PATH
+        dir_name = os.path.dirname(db_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_tables()
 
