@@ -141,14 +141,16 @@ async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "│    🍪  <b>UPLOAD COOKIES</b>      │\n"
         "└─────────────────────────────┘\n\n"
         "  Send a <b>Netscape cookies.txt</b>\n"
-        "  file to enable age-restricted\n"
-        "  site downloads.\n\n"
+        "  file to enable bot detection\n"
+        "  bypass.\n\n"
         "  <b>How to get cookies.txt:</b>\n"
         "  1. Install the browser extension\n"
-        "     \"Get cookies.txt LOCALLY\"\n"
-        "  2. Visit the site (e.g. pornhub)\n"
+        '     "Get cookies.txt LOCALLY"\n'
+        "  2. Visit the site while logged in\n"
         "  3. Click the extension → Export\n"
         "  4. Send the .txt file here\n\n"
+        "  You can upload multiple files\n"
+        "  (YouTube, Pornhub, etc.)\n\n"
         "  ⚠️ Send /skip to cancel.",
         parse_mode=ParseMode.HTML
     )
@@ -175,14 +177,36 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         text_content = content.decode("utf-8", errors="ignore")
         if "netscape" in text_content.lower() or "\t" in text_content:
+            existing = ""
+            if os.path.exists(COOKIES_PATH):
+                with open(COOKIES_PATH, "r", encoding="utf-8") as f:
+                    existing = f.read()
+
+            domains = set()
+            for line in text_content.split("\n"):
+                if line.strip() and not line.startswith("#"):
+                    parts = line.split("\t")
+                    if len(parts) >= 5:
+                        domains.add(parts[0].lower())
+
+            merged_lines = []
+            for line in existing.split("\n"):
+                if line.strip() and not line.startswith("#"):
+                    parts = line.split("\t")
+                    if len(parts) >= 5 and parts[0].lower() not in domains:
+                        merged_lines.append(line)
+                else:
+                    merged_lines.append(line)
+
+            merged = "\n".join(merged_lines) + "\n" + text_content
             with open(COOKIES_PATH, "w", encoding="utf-8") as f:
-                f.write(text_content)
+                f.write(merged)
             await update.message.reply_text(
                 "┌─────────────────────────────┐\n"
                 "│    ✅  <b>COOKIES UPLOADED</b>    │\n"
                 "└─────────────────────────────┘\n\n"
-                "  🍪 Age-restricted sites are\n"
-                "  now enabled!\n\n"
+                f"  🍪 Added cookies for:\n"
+                f"  <code>{', '.join(sorted(domains))}</code>\n\n"
                 "  Send a video link to test.",
                 parse_mode=ParseMode.HTML
             )
