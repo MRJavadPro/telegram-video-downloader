@@ -46,8 +46,9 @@ class VideoDownloader:
             return ["--cookies", COOKIES_PATH]
         return []
 
-    def _run_ytdlp(self, args: list, timeout: int = 60) -> Tuple[bool, str, str]:
-        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
+    def _run_ytdlp(self, args: list, timeout: int = 60, use_cookies: bool = True) -> Tuple[bool, str, str]:
+        cookie_args = self._get_cookies_args() if use_cookies else []
+        cmd = [sys.executable, "-m", "yt_dlp"] + cookie_args + args
         try:
             result = subprocess.run(
                 cmd,
@@ -232,7 +233,7 @@ class VideoDownloader:
             "--no-playlist",
             "--ignore-errors",
             "--no-warnings",
-        ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90)
+        ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90, use_cookies=False)
 
         if not ok:
             print(f"[yt-dlp error] {stderr[:500]}", flush=True)
