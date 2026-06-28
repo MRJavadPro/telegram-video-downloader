@@ -362,12 +362,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.edit_text(
             "❌ Fetch Failed\n\n"
             "Could not fetch video info.\n\n"
-            "Possible reasons:\n"
-            "• Video is private or deleted\n"
-            "• Geo-restricted content\n"
-            "• Age-restricted (needs cookies)\n"
-            "• Site blocking server requests\n\n"
-            "💡 Admin can upload cookies via /cookies"
+            "This site may require authentication.\n"
+            "Admin: upload cookies via /cookies\n\n"
+            "Supported without cookies:\n"
+            "YouTube, TikTok, Twitter/X, Reddit\n"
+            "Facebook, Vimeo, Dailymotion, Twitch"
         )
         return
 
@@ -463,8 +462,11 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
         db.log_download(chat_id, title, url, quality_label, 0, elapsed, "failed")
         await query.message.reply_text(
             "❌ Download Failed\n\n"
-            "Please try again or select a different quality.\n\n"
-            "💡 Lower quality = faster download."
+            "Could not download this video.\n\n"
+            "Try:\n"
+            "• Lower quality selection\n"
+            "• Different video URL\n"
+            "• Admin: upload cookies via /cookies"
         )
         if chat_id in user_data:
             del user_data[chat_id]

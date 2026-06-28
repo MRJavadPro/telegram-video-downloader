@@ -16,6 +16,7 @@ YTDLP_COMMON_ARGS = [
     "--legacy-server-connect",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "--add-header", "Accept-Language:en-US,en;q=0.9",
+    "--extractor-args", "youtube:player_client=ios,web,mweb",
 ]
 
 COOKIES_PATH = os.getenv("COOKIES_PATH", "/tmp/cookies.txt")
@@ -79,6 +80,32 @@ class VideoDownloader:
             "--no-progress",
         ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
         print(f"[yt-dlp] downloading: {fmt_str}", flush=True)
+        result = self._run_download(cmd, temp_dir)
+        if result:
+            return result
+
+        print("[yt-dlp] first format failed, trying best fallback", flush=True)
+        fallback_dir = tempfile.mkdtemp()
+        fallback_template = os.path.join(fallback_dir, "%(title).80s.%(ext)s")
+        fallback_cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "-o", fallback_template,
+            "--no-playlist",
+            "--socket-timeout", "30",
+            "--retries", "5",
+            "--fragment-retries", "10",
+            "--concurrent-fragments", "4",
+            "--no-progress",
+        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        result = self._run_download(fallback_cmd, fallback_dir)
+        if result:
+            return result
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+
+    def _run_download(self, cmd: list, temp_dir: str) -> Optional[str]:
         proc = None
         try:
             proc = subprocess.Popen(
@@ -89,11 +116,10 @@ class VideoDownloader:
             )
             _, stderr = proc.communicate(timeout=self.timeout)
             if proc.returncode != 0:
-                print(f"[yt-dlp file error] rc={proc.returncode}", flush=True)
+                print(f"[yt-dlp dl error] rc={proc.returncode}", flush=True)
                 if stderr:
-                    for line in stderr.strip().split("\n")[-10:]:
+                    for line in stderr.strip().split("\n")[-5:]:
                         print(f"  {line}", flush=True)
-                shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
             for f in os.listdir(temp_dir):
                 fp = os.path.join(temp_dir, f)
@@ -102,19 +128,16 @@ class VideoDownloader:
                     print(f"[yt-dlp] success: {f} ({size} bytes)", flush=True)
                     return fp
             print("[yt-dlp] no output file found in temp dir", flush=True)
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except subprocess.TimeoutExpired:
             if proc:
                 proc.kill()
             print("[yt-dlp] download timed out", flush=True)
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except Exception as e:
             if proc:
                 proc.kill()
             print(f"[yt-dlp] download error: {e}", flush=True)
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
     def _run_spotdl(self, url: str, output_dir: str) -> Tuple[bool, str, str]:
@@ -251,7 +274,18 @@ class VideoDownloader:
             "--no-warnings",
         ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90)
 
-        if not ok:
+        if not ok or not stdout.strip():
+            print(f"[yt-dlp info fallback] first attempt failed, trying with different player", flush=True)
+            ok, stdout, stderr = self._run_ytdlp([
+                "--no-download",
+                "--print-json",
+                "--no-playlist",
+                "--ignore-errors",
+                "--no-warnings",
+                "--extractor-args", "youtube:player_client=web_creator",
+            ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings", "--extractor-args", "youtube:player_client=ios,web,mweb")] + [url], timeout=90)
+
+        if not ok or not stdout.strip():
             print(f"[yt-dlp error] {stderr[:500]}", flush=True)
             return None
 
