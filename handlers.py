@@ -1,6 +1,7 @@
 import os
+import io
 import time
-import shutil
+import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -140,17 +141,18 @@ async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.document:
-        return False
-
-    if not is_admin(update.effective_user.id):
+    if not context.user_data.get("awaiting_cookies"):
         return False
 
     context.user_data["awaiting_cookies"] = False
 
-    filename = update.message.document.file_name or ""
-    if not filename.endswith(".txt"):
-        return False
+    if update.message.text and update.message.text.strip() == "/skip":
+        await update.message.reply_text("❌ Cookie upload cancelled.")
+        return True
+
+    if not update.message.document:
+        await update.message.reply_text("❌ Please send a .txt file.")
+        return True
 
     file = await update.message.document.get_file()
     content = await file.download_as_bytearray()
@@ -259,8 +261,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    url = url.split("?si=")[0].rstrip("/")
-
     loading = await message.reply_text(
         "⏳ Fetching...\n\n"
         "🔍 Analyzing link..."
@@ -274,10 +274,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         start_time = time.time()
-        file_path = downloader.download_spotify_to_file(url)
+        audio_stream = downloader.download_spotify(url)
         elapsed = time.time() - start_time
 
-        if not file_path:
+        if not audio_stream:
             await loading.edit_text(
                 "❌ Download Failed\n\n"
                 "Could not download Spotify track.\n"
@@ -285,15 +285,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        file_size = os.path.getsize(file_path)
+        file_size = audio_stream.getbuffer().nbytes
         info = downloader.get_spotify_info(url)
         title = info.get("title", "Spotify Track") if info else "Spotify Track"
         artist = info.get("artist", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
+        temp_path = None
         try:
-            with open(file_path, "rb") as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                audio_stream.seek(0)
+                tmp.write(audio_stream.read())
+                temp_path = tmp.name
+
+            with open(temp_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
@@ -307,9 +313,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
-            temp_parent = os.path.dirname(file_path)
-            if temp_parent and temp_parent != file_path:
-                shutil.rmtree(temp_parent, ignore_errors=True)
+            audio_stream.close()
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
         return
 
     if is_soundcloud_url(url):
@@ -320,10 +326,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         start_time = time.time()
-        file_path = downloader.download_soundcloud_to_file(url)
+        audio_stream = downloader.download_soundcloud(url)
         elapsed = time.time() - start_time
 
-        if not file_path:
+        if not audio_stream:
             await loading.edit_text(
                 "❌ Download Failed\n\n"
                 "Could not download SoundCloud track.\n"
@@ -331,15 +337,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        file_size = os.path.getsize(file_path)
+        file_size = audio_stream.getbuffer().nbytes
         info = downloader.get_video_info(url)
         title = info.get("title", "SoundCloud Track") if info else "SoundCloud Track"
         artist = info.get("uploader", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
+        temp_path = None
         try:
-            with open(file_path, "rb") as f:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                audio_stream.seek(0)
+                tmp.write(audio_stream.read())
+                temp_path = tmp.name
+
+            with open(temp_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
@@ -353,9 +365,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
-            temp_parent = os.path.dirname(file_path)
-            if temp_parent and temp_parent != file_path:
-                shutil.rmtree(temp_parent, ignore_errors=True)
+            audio_stream.close()
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
         return
 
     info = downloader.get_video_info(url)
@@ -363,11 +375,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.edit_text(
             "❌ Fetch Failed\n\n"
             "Could not fetch video info.\n\n"
-            "This site may require authentication.\n"
-            "Admin: upload cookies via /cookies\n\n"
-            "Supported without cookies:\n"
-            "YouTube, TikTok, Twitter/X, Reddit\n"
-            "Facebook, Vimeo, Dailymotion, Twitch"
+            "Possible reasons:\n"
+            "• Video is private or deleted\n"
+            "• Geo-restricted content\n"
+            "• Age-restricted (needs cookies)\n"
+            "• Site blocking server requests\n\n"
+            "💡 Admin can upload cookies via /cookies"
         )
         return
 
@@ -446,7 +459,6 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
             break
 
     quality_label = selected_option["label"] if selected_option else "best"
-    has_audio = selected_option.get("has_audio", True) if selected_option else True
 
     await query.edit_message_text(
         f"⬇️ Downloading\n\n"
@@ -456,24 +468,21 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     )
 
     start_time = time.time()
-    file_path = downloader.download_video_to_file(url, format_id, has_audio=has_audio)
+    video_stream = downloader.download_video(url, format_id)
     elapsed = time.time() - start_time
 
-    if not file_path:
+    if not video_stream:
         db.log_download(chat_id, title, url, quality_label, 0, elapsed, "failed")
         await query.message.reply_text(
             "❌ Download Failed\n\n"
-            "Could not download this video.\n\n"
-            "Try:\n"
-            "• Lower quality selection\n"
-            "• Different video URL\n"
-            "• Admin: upload cookies via /cookies"
+            "Please try again or select a different quality.\n\n"
+            "💡 Lower quality = faster download."
         )
         if chat_id in user_data:
             del user_data[chat_id]
         return
 
-    file_size = os.path.getsize(file_path)
+    file_size = video_stream.getbuffer().nbytes
     db.log_download(chat_id, title, url, quality_label, file_size, elapsed)
 
     caption = (
@@ -481,8 +490,14 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
         f"🎯 {quality_label} • 📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s"
     )
 
+    temp_path = None
     try:
-        with open(file_path, "rb") as f:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            video_stream.seek(0)
+            tmp.write(video_stream.read())
+            temp_path = tmp.name
+
+        with open(temp_path, "rb") as f:
             if file_size <= MAX_FILE_SIZE:
                 await context.bot.send_video(
                     chat_id=chat_id,
@@ -506,7 +521,9 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
             f"❌ Failed to send: {str(e)[:100]}"
         )
     finally:
-        shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
+        video_stream.close()
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
         if chat_id in user_data:
             del user_data[chat_id]
 
