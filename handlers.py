@@ -1,7 +1,6 @@
 import os
-import io
 import time
-import tempfile
+import shutil
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -58,7 +57,7 @@ SITES_TEXT = (
 )
 
 
-# ─── USER HANDLERS ───
+# --- USER HANDLERS ---
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,26 +65,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_user(user.id, user.username or "", user.first_name or "", user.last_name or "")
 
     if db.is_banned(user.id):
-        await update.message.reply_text("🚫 You are banned from using this bot.")
+        await update.message.reply_text("You are banned from using this bot.")
         return
 
     text = (
-        f"🎬 Video Downloader\n\n"
-        f"Hey {user.first_name}! 👋\n"
+        f"Video Downloader\n\n"
+        f"Hey {user.first_name}!\n"
         f"Send me any video or music link\n"
         f"and I'll download it for you.\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🌐 Supported sites:\n"
+        f"-------------------------\n\n"
+        f"Supported sites:\n"
         f"{SITES_TEXT}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 Just paste any link to start!"
+        f"-------------------------\n\n"
+        f"Just paste any link to start!"
     )
 
     buttons = []
     if is_admin(user.id):
-        buttons.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data="admin_menu")])
-    buttons.append([InlineKeyboardButton("📊 My Stats", callback_data=f"stats_{user.id}")])
-    buttons.append([InlineKeyboardButton("❓ Help", callback_data="help_msg")])
+        buttons.append([InlineKeyboardButton("Admin Panel", callback_data="admin_menu")])
+    buttons.append([InlineKeyboardButton("My Stats", callback_data=f"stats_{user.id}")])
+    buttons.append([InlineKeyboardButton("Help", callback_data="help_msg")])
 
     await update.message.reply_text(
         text,
@@ -97,18 +96,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    cookies_status = "✅ Uploaded" if os.path.exists(COOKIES_PATH) else "❌ Not uploaded"
+    cookies_status = "Uploaded" if os.path.exists(COOKIES_PATH) else "Not uploaded"
     text = (
-        "❓ How To Use\n\n"
+        "How To Use\n\n"
         "Step 1: Copy a video/music URL\n"
         "Step 2: Paste it here\n"
         "Step 3: Pick quality\n"
         "Step 4: Wait for download\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🍪 Cookies: {cookies_status}\n\n"
-        f"🌐 Supported sites:\n"
+        "-------------------------\n\n"
+        f"Cookies: {cookies_status}\n\n"
+        f"Supported sites:\n"
         f"{SITES_TEXT}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "-------------------------\n\n"
         "For age-restricted or bot-blocked\n"
         "sites, send /cookies with a\n"
         "Netscape cookies.txt file."
@@ -119,40 +118,39 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user.id):
-        await update.message.reply_text("🚫 Only admin can upload cookies.")
+        await update.message.reply_text("Only admin can upload cookies.")
         return
 
     await update.message.reply_text(
-        "🍪 Upload Cookies\n\n"
+        "Upload Cookies\n\n"
         "Send a Netscape cookies.txt file\n"
         "to bypass bot detection.\n\n"
         "How to get cookies.txt:\n"
         '1. Install "Get cookies.txt LOCALLY"\n'
         "   browser extension\n"
         "2. Visit the site while logged in\n"
-        "3. Click the extension → Export\n"
+        "3. Click the extension - Export\n"
         "4. Send the .txt file here\n\n"
         "You can upload multiple files\n"
         "(YouTube, TikTok, etc.)\n\n"
-        "⚠️ Send /skip to cancel.",
+        "Send /skip to cancel.",
         parse_mode=ParseMode.HTML
     )
     context.user_data["awaiting_cookies"] = True
 
 
 async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_cookies"):
+    if not update.message.document:
+        return False
+
+    if not is_admin(update.effective_user.id):
         return False
 
     context.user_data["awaiting_cookies"] = False
 
-    if update.message.text and update.message.text.strip() == "/skip":
-        await update.message.reply_text("❌ Cookie upload cancelled.")
-        return True
-
-    if not update.message.document:
-        await update.message.reply_text("❌ Please send a .txt file.")
-        return True
+    filename = update.message.document.file_name or ""
+    if not filename.endswith(".txt"):
+        return False
 
     file = await update.message.document.get_file()
     content = await file.download_as_bytearray()
@@ -196,29 +194,17 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
                         continue
                     domains.add(domain.lower().lstrip("."))
                     fixed_lines.append(f"{domain}\t{parts[1]}\t{parts[2]}\t{parts[3]}\t{parts[4]}\t{parts[5]}\t{parts[6]}")
-                elif len(parts) >= 5:
-                    domain = parts[0].strip()
-                    if not domain:
-                        continue
-                    domains.add(domain.lower().lstrip("."))
-                    inc_sub = "TRUE" if domain.startswith(".") else "FALSE"
-                    path_val = parts[2] if len(parts) > 2 else "/"
-                    secure_val = parts[3] if len(parts) > 3 else "FALSE"
-                    expires_val = parts[4] if len(parts) > 4 else "0"
-                    name_val = parts[5] if len(parts) > 5 else ""
-                    val_val = parts[6] if len(parts) > 6 else ""
-                    fixed_lines.append(f"{domain}\t{inc_sub}\t{path_val}\t{secure_val}\t{expires_val}\t{name_val}\t{val_val}")
 
         if not domains:
             await update.message.reply_text(
-                "❌ No valid cookies found in file.\n\n"
+                "No valid cookies found in file.\n\n"
                 'Use "Get cookies.txt LOCALLY" extension\n'
                 "while logged into the website."
             )
             return True
 
         fixed_content = "\n".join(fixed_lines) + "\n"
-        os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
+        os.makedirs(os.path.dirname(COOKIES_PATH) or ".", exist_ok=True)
         with open(COOKIES_PATH, "w", encoding="utf-8") as f:
             f.write(fixed_content)
         db.set_setting("cookies", fixed_content)
@@ -229,14 +215,14 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
         if count > 5:
             preview += f" +{count - 5} more"
         await update.message.reply_text(
-            f"✅ Cookies Uploaded\n\n"
+            f"Cookies Uploaded\n\n"
             f"Added {count} domains\n"
             f"{preview}\n\n"
             f"Send a video link to test.",
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+        await update.message.reply_text(f"Error: {str(e)[:100]}")
 
     return True
 
@@ -247,147 +233,134 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_user(user.id, user.username or "", user.first_name or "", user.last_name or "")
 
     if db.is_banned(user.id):
-        await message.reply_text("🚫 You are banned from using this bot.")
+        await message.reply_text("You are banned from using this bot.")
         return
 
     url = message.text.strip()
 
     if not downloader.is_valid_url(url):
         await message.reply_text(
-            "❌ Invalid URL\n\n"
+            "Invalid URL\n\n"
             "Please send a valid video or music link.\n\n"
-            f"🌐 Supported sites:\n{SITES_TEXT}",
+            f"Supported sites:\n{SITES_TEXT}",
             parse_mode=ParseMode.HTML
         )
         return
 
     loading = await message.reply_text(
-        "⏳ Fetching...\n\n"
-        "🔍 Analyzing link..."
+        "Fetching...\n\n"
+        "Analyzing link..."
     )
 
     if is_spotify_url(url):
         chat_id = message.chat_id
         await loading.edit_text(
-            "🎵 Spotify Track\n\n"
-            "⬇️ Downloading audio..."
+            "Spotify Track\n\n"
+            "Downloading audio..."
         )
 
         start_time = time.time()
-        audio_stream = downloader.download_spotify(url)
+        file_path = downloader.download_spotify_to_file(url)
         elapsed = time.time() - start_time
 
-        if not audio_stream:
+        if not file_path:
             await loading.edit_text(
-                "❌ Download Failed\n\n"
+                "Download Failed\n\n"
                 "Could not download Spotify track.\n"
                 "The link may be invalid or restricted."
             )
             return
 
-        file_size = audio_stream.getbuffer().nbytes
+        file_size = os.path.getsize(file_path)
         info = downloader.get_spotify_info(url)
         title = info.get("title", "Spotify Track") if info else "Spotify Track"
         artist = info.get("artist", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
-        temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-                audio_stream.seek(0)
-                tmp.write(audio_stream.read())
-                temp_path = tmp.name
-
-            with open(temp_path, "rb") as f:
+            with open(file_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
                     title=title,
                     performer=artist,
-                    caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
+                    caption=f"{artist} - {title}\n{format_size(file_size)} - {elapsed:.1f}s",
                     parse_mode=ParseMode.HTML,
                     read_timeout=DOWNLOAD_TIMEOUT,
                     write_timeout=DOWNLOAD_TIMEOUT
                 )
         except Exception as e:
-            await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
+            await loading.edit_text(f"Failed to send: {str(e)[:100]}")
         finally:
-            audio_stream.close()
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            temp_parent = os.path.dirname(file_path)
+            if temp_parent:
+                shutil.rmtree(temp_parent, ignore_errors=True)
         return
 
     if is_soundcloud_url(url):
         chat_id = message.chat_id
         await loading.edit_text(
-            "🎵 SoundCloud Track\n\n"
-            "⬇️ Downloading audio..."
+            "SoundCloud Track\n\n"
+            "Downloading audio..."
         )
 
         start_time = time.time()
-        audio_stream = downloader.download_soundcloud(url)
+        file_path = downloader.download_soundcloud_to_file(url)
         elapsed = time.time() - start_time
 
-        if not audio_stream:
+        if not file_path:
             await loading.edit_text(
-                "❌ Download Failed\n\n"
+                "Download Failed\n\n"
                 "Could not download SoundCloud track.\n"
                 "The link may be invalid or restricted."
             )
             return
 
-        file_size = audio_stream.getbuffer().nbytes
+        file_size = os.path.getsize(file_path)
         info = downloader.get_video_info(url)
         title = info.get("title", "SoundCloud Track") if info else "SoundCloud Track"
         artist = info.get("uploader", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
-        temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-                audio_stream.seek(0)
-                tmp.write(audio_stream.read())
-                temp_path = tmp.name
-
-            with open(temp_path, "rb") as f:
+            with open(file_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
                     title=title,
                     performer=artist,
-                    caption=f"🎵 {artist} - {title}\n📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s",
+                    caption=f"{artist} - {title}\n{format_size(file_size)} - {elapsed:.1f}s",
                     parse_mode=ParseMode.HTML,
                     read_timeout=DOWNLOAD_TIMEOUT,
                     write_timeout=DOWNLOAD_TIMEOUT
                 )
         except Exception as e:
-            await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
+            await loading.edit_text(f"Failed to send: {str(e)[:100]}")
         finally:
-            audio_stream.close()
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            temp_parent = os.path.dirname(file_path)
+            if temp_parent:
+                shutil.rmtree(temp_parent, ignore_errors=True)
         return
 
     info = downloader.get_video_info(url)
     if not info:
         await loading.edit_text(
-            "❌ Fetch Failed\n\n"
+            "Fetch Failed\n\n"
             "Could not fetch video info.\n\n"
-            "Possible reasons:\n"
-            "• Video is private or deleted\n"
-            "• Geo-restricted content\n"
-            "• Age-restricted (needs cookies)\n"
-            "• Site blocking server requests\n\n"
-            "💡 Admin can upload cookies via /cookies"
+            "This site may require authentication.\n"
+            "Admin: upload cookies via /cookies\n\n"
+            "Supported without cookies:\n"
+            "YouTube, TikTok, Twitter/X, Reddit\n"
+            "Facebook, Vimeo, Dailymotion, Twitch"
         )
         return
 
     quality_options = downloader.get_quality_options(info["formats"], info.get("duration", 0))
     if not quality_options:
         await loading.edit_text(
-            "❌ No Formats\n\n"
+            "No Formats\n\n"
             "No downloadable formats found.\n"
             "The video may be protected."
         )
@@ -411,15 +384,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = []
     for i, opt in enumerate(quality_options):
         size_str = format_size(opt.get("filesize", 0))
-        emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"][i] if i < 8 else "⬇️"
-        label = f"{emoji} {opt['label']}  •  ~{size_str}"
+        emoji = ["1", "2", "3", "4", "5", "6", "7", "8"][i] if i < 8 else "d"
+        label = f"{emoji}. {opt['label']}  -  ~{size_str}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"dl_{opt['format_id']}")])
 
-    buttons.append([InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{message.chat_id}")])
+    buttons.append([InlineKeyboardButton("Refresh", callback_data=f"refresh_{message.chat_id}")])
 
     text = (
-        f"🎬 {title}\n"
-        f"👤 {uploader} • ⏱ {duration} • 👁 {views}\n\n"
+        f"{title}\n"
+        f"{uploader} - {duration} - {views}\n\n"
         f"Pick a quality:"
     )
 
@@ -443,7 +416,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
 
     if chat_id not in user_data:
         await query.edit_message_text(
-            "⏰ Session Expired\n\n"
+            "Session Expired\n\n"
             "Please send the video link again."
         )
         return
@@ -461,43 +434,40 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     quality_label = selected_option["label"] if selected_option else "best"
 
     await query.edit_message_text(
-        f"⬇️ Downloading\n\n"
-        f"📌 {title[:50]}\n"
-        f"🎯 Quality: {quality_label}\n\n"
-        f"⚡ Multi-threaded download active..."
+        f"Downloading\n\n"
+        f"{title[:50]}\n"
+        f"Quality: {quality_label}\n\n"
+        f"Multi-threaded download active..."
     )
 
     start_time = time.time()
-    video_stream = downloader.download_video(url, format_id)
+    file_path = downloader.download_video_to_file(url, format_id)
     elapsed = time.time() - start_time
 
-    if not video_stream:
+    if not file_path:
         db.log_download(chat_id, title, url, quality_label, 0, elapsed, "failed")
         await query.message.reply_text(
-            "❌ Download Failed\n\n"
-            "Please try again or select a different quality.\n\n"
-            "💡 Lower quality = faster download."
+            "Download Failed\n\n"
+            "Could not download this video.\n\n"
+            "Try:\n"
+            "- Lower quality selection\n"
+            "- Different video URL\n"
+            "- Admin: upload cookies via /cookies"
         )
         if chat_id in user_data:
             del user_data[chat_id]
         return
 
-    file_size = video_stream.getbuffer().nbytes
+    file_size = os.path.getsize(file_path)
     db.log_download(chat_id, title, url, quality_label, file_size, elapsed)
 
     caption = (
-        f"🎬 {title[:100]}\n\n"
-        f"🎯 {quality_label} • 📦 {format_size(file_size)} • ⏱ {elapsed:.1f}s"
+        f"{title[:100]}\n\n"
+        f"{quality_label} - {format_size(file_size)} - {elapsed:.1f}s"
     )
 
-    temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            video_stream.seek(0)
-            tmp.write(video_stream.read())
-            temp_path = tmp.name
-
-        with open(temp_path, "rb") as f:
+        with open(file_path, "rb") as f:
             if file_size <= MAX_FILE_SIZE:
                 await context.bot.send_video(
                     chat_id=chat_id,
@@ -518,12 +488,10 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
                 )
     except Exception as e:
         await query.message.reply_text(
-            f"❌ Failed to send: {str(e)[:100]}"
+            f"Failed to send: {str(e)[:100]}"
         )
     finally:
-        video_stream.close()
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+        shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
         if chat_id in user_data:
             del user_data[chat_id]
 
@@ -535,16 +503,16 @@ async def handle_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = db.get_user_stats(user_id)
 
     if not stats:
-        await query.edit_message_text("❌ No stats found.")
+        await query.edit_message_text("No stats found.")
         return
 
     text = (
-        f"📊 Your Statistics\n\n"
-        f"👤 {stats['first_name'] or 'User'}\n"
-        f"🆔 {stats['user_id']}\n"
-        f"📅 Member since: {stats['first_seen'][:10]}\n"
-        f"⏰ Last active: {stats['last_active'][:16]}\n\n"
-        f"📥 Total Downloads: {stats['total_downloads']}"
+        f"Your Statistics\n\n"
+        f"{stats['first_name'] or 'User'}\n"
+        f"ID: {stats['user_id']}\n"
+        f"Member since: {stats['first_seen'][:10]}\n"
+        f"Last active: {stats['last_active'][:16]}\n\n"
+        f"Total Downloads: {stats['total_downloads']}"
     )
     await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
@@ -553,7 +521,7 @@ async def handle_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pass
 
 
-# ─── ADMIN HANDLERS ───
+# --- ADMIN HANDLERS ---
 
 
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -561,7 +529,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if not is_admin(query.from_user.id):
-        await query.edit_message_text("🚫 Admin access required.")
+        await query.edit_message_text("Admin access required.")
         return
 
     total_users = db.get_total_users()
@@ -569,20 +537,20 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_downloads = db.get_today_downloads()
 
     text = (
-        "⚙️ Admin Panel\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"📥 Total Downloads: {total_downloads}\n"
-        f"📅 Today: {today_downloads}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Admin Panel\n\n"
+        f"Total Users: {total_users}\n"
+        f"Total Downloads: {total_downloads}\n"
+        f"Today: {today_downloads}\n\n"
+        "-------------------------\n\n"
         "Management:"
     )
 
     buttons = [
-        [InlineKeyboardButton("👥 All Users", callback_data="admin_users")],
-        [InlineKeyboardButton("📈 Daily Stats", callback_data="admin_daily")],
-        [InlineKeyboardButton("🏆 Top Users", callback_data="admin_top")],
-        [InlineKeyboardButton("🔍 Search User", callback_data="admin_search")],
-        [InlineKeyboardButton("🔙 Back", callback_data="admin_back")],
+        [InlineKeyboardButton("All Users", callback_data="admin_users")],
+        [InlineKeyboardButton("Daily Stats", callback_data="admin_daily")],
+        [InlineKeyboardButton("Top Users", callback_data="admin_top")],
+        [InlineKeyboardButton("Search User", callback_data="admin_search")],
+        [InlineKeyboardButton("Back", callback_data="admin_back")],
     ]
 
     await query.edit_message_text(
@@ -600,21 +568,21 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     users = db.get_all_users()
-    text = "👥 All Users\n\n"
+    text = "All Users\n\n"
 
     for u in users[:15]:
-        status = "🚫" if u["is_banned"] else "✅"
+        status = "Banned" if u["is_banned"] else "Active"
         name = u["first_name"] or u["username"] or "Unknown"
-        text += f"{status} {name[:20]} • 📥 {u['total_downloads']}\n"
+        text += f"{status} {name[:20]} - {u['total_downloads']} downloads\n"
         text += f"  {u['user_id']}\n\n"
 
     if len(users) > 15:
         text += f"... and {len(users) - 15} more users\n"
 
-    text += "━━━━━━━━━━━━━━━━━━━━━━━"
+    text += "-------------------------"
 
     buttons = [
-        [InlineKeyboardButton("🔙 Back", callback_data="admin_menu")]
+        [InlineKeyboardButton("Back", callback_data="admin_menu")]
     ]
 
     await query.edit_message_text(
@@ -632,21 +600,21 @@ async def admin_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     data = db.get_downloads_by_date(7)
-    text = "📈 Daily Downloads\n\n"
+    text = "Daily Downloads\n\n"
 
     max_count = max((d["count"] for d in data), default=1) or 1
     for d in data:
         bar_len = int(20 * d["count"] / max_count) if max_count > 0 else 0
-        bar = "█" * bar_len + "░" * (20 - bar_len)
+        bar = "#" * bar_len + "-" * (20 - bar_len)
         day_name = d["date"][5:]
-        text += f"📅 {day_name}\n"
+        text += f"{day_name}\n"
         text += f"   [{bar}] {d['count']}\n\n"
 
     total = sum(d["count"] for d in data)
-    text += f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += f"📊 7-Day Total: {total}"
+    text += f"-------------------------\n"
+    text += f"7-Day Total: {total}"
 
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="admin_menu")]]
+    buttons = [[InlineKeyboardButton("Back", callback_data="admin_menu")]]
     await query.edit_message_text(
         text,
         parse_mode=ParseMode.HTML,
@@ -662,18 +630,16 @@ async def admin_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     top_users = db.get_top_users(10)
-    text = "🏆 Top Users\n\n"
+    text = "Top Users\n\n"
 
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     for i, u in enumerate(top_users):
         name = u["first_name"] or u["username"] or "Unknown"
-        medal = medals[i] if i < len(medals) else f"{i+1}."
-        text += f"{medal} {name[:25]}\n"
-        text += f"   📥 {u['total_downloads']} downloads\n\n"
+        text += f"{i+1}. {name[:25]}\n"
+        text += f"   {u['total_downloads']} downloads\n\n"
 
-    text += "━━━━━━━━━━━━━━━━━━━━━━━"
+    text += "-------------------------"
 
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="admin_menu")]]
+    buttons = [[InlineKeyboardButton("Back", callback_data="admin_menu")]]
     await query.edit_message_text(
         text,
         parse_mode=ParseMode.HTML,
@@ -689,10 +655,10 @@ async def admin_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.edit_message_text(
-        "🔍 Search User\n\n"
+        "Search User\n\n"
         "Send a user ID to view their\n"
         "download history.\n\n"
-        "💡 Example: 123456789"
+        "Example: 123456789"
     )
 
     context.user_data["awaiting_search_id"] = True
@@ -710,47 +676,47 @@ async def admin_handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         user_id = int(update.message.text.strip())
     except ValueError:
-        await update.message.reply_text("❌ Invalid user ID. Send a numeric ID.")
+        await update.message.reply_text("Invalid user ID. Send a numeric ID.")
         return True
 
     stats = db.get_user_stats(user_id)
     if not stats:
-        await update.message.reply_text(f"❌ User {user_id} not found.")
+        await update.message.reply_text(f"User {user_id} not found.")
         return True
 
     downloads = db.get_user_downloads(user_id, limit=10)
-    status = "🚫 Banned" if stats["is_banned"] else "✅ Active"
+    status = "Banned" if stats["is_banned"] else "Active"
 
     text = (
-        f"👤 User Profile\n\n"
-        f"🆔 {stats['user_id']}\n"
-        f"👤 {stats['first_name'] or 'N/A'}\n"
-        f"📛 @{stats['username'] or 'N/A'}\n"
-        f"📊 Status: {status}\n"
-        f"📥 Downloads: {stats['total_downloads']}\n"
-        f"📅 Since: {stats['first_seen'][:10]}\n"
-        f"⏰ Active: {stats['last_active'][:16]}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📜 Recent Downloads:\n\n"
+        f"User Profile\n\n"
+        f"ID: {stats['user_id']}\n"
+        f"Name: {stats['first_name'] or 'N/A'}\n"
+        f"Username: @{stats['username'] or 'N/A'}\n"
+        f"Status: {status}\n"
+        f"Downloads: {stats['total_downloads']}\n"
+        f"Since: {stats['first_seen'][:10]}\n"
+        f"Active: {stats['last_active'][:16]}\n\n"
+        f"-------------------------\n\n"
+        f"Recent Downloads:\n\n"
     )
 
     for d in downloads:
         title = d["video_title"][:35]
-        text += f"🎬 {title}\n"
-        text += f"   🎯 {d['quality']} • 📦 {format_size(d['file_size'])}\n"
-        text += f"   📅 {d['timestamp'][:16]}\n\n"
+        text += f"{title}\n"
+        text += f"  {d['quality']} - {format_size(d['file_size'])}\n"
+        text += f"  {d['timestamp'][:16]}\n\n"
 
     if not downloads:
         text += "(No downloads yet)\n\n"
 
-    text += "━━━━━━━━━━━━━━━━━━━━━━━"
+    text += "-------------------------"
 
     buttons = []
     if stats["is_banned"]:
-        buttons.append([InlineKeyboardButton(f"✅ Unban {user_id}", callback_data=f"unban_{user_id}")])
+        buttons.append([InlineKeyboardButton(f"Unban {user_id}", callback_data=f"unban_{user_id}")])
     else:
-        buttons.append([InlineKeyboardButton(f"🚫 Ban {user_id}", callback_data=f"ban_{user_id}")])
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_menu")])
+        buttons.append([InlineKeyboardButton(f"Ban {user_id}", callback_data=f"ban_{user_id}")])
+    buttons.append([InlineKeyboardButton("Back", callback_data="admin_menu")])
 
     await update.message.reply_text(
         text,
@@ -769,7 +735,7 @@ async def admin_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = int(query.data.split("_")[1])
     db.ban_user(user_id)
-    await query.edit_message_text(f"✅ User {user_id} has been banned.")
+    await query.edit_message_text(f"User {user_id} has been banned.")
 
 
 async def admin_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -781,7 +747,7 @@ async def admin_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = int(query.data.split("_")[1])
     db.unban_user(user_id)
-    await query.edit_message_text(f"✅ User {user_id} has been unbanned.")
+    await query.edit_message_text(f"User {user_id} has been unbanned.")
 
 
 async def admin_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -796,20 +762,20 @@ async def admin_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_downloads = db.get_today_downloads()
 
     text = (
-        "⚙️ Admin Panel\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"📥 Total Downloads: {total_downloads}\n"
-        f"📅 Today: {today_downloads}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Admin Panel\n\n"
+        f"Total Users: {total_users}\n"
+        f"Total Downloads: {total_downloads}\n"
+        f"Today: {today_downloads}\n\n"
+        "-------------------------\n\n"
         "Management:"
     )
 
     buttons = [
-        [InlineKeyboardButton("👥 All Users", callback_data="admin_users")],
-        [InlineKeyboardButton("📈 Daily Stats", callback_data="admin_daily")],
-        [InlineKeyboardButton("🏆 Top Users", callback_data="admin_top")],
-        [InlineKeyboardButton("🔍 Search User", callback_data="admin_search")],
-        [InlineKeyboardButton("🔙 Back to Main", callback_data="admin_back_main")],
+        [InlineKeyboardButton("All Users", callback_data="admin_users")],
+        [InlineKeyboardButton("Daily Stats", callback_data="admin_daily")],
+        [InlineKeyboardButton("Top Users", callback_data="admin_top")],
+        [InlineKeyboardButton("Search User", callback_data="admin_search")],
+        [InlineKeyboardButton("Back to Main", callback_data="admin_back_main")],
     ]
 
     await query.edit_message_text(
@@ -825,22 +791,22 @@ async def admin_back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = query.from_user
     text = (
-        f"🎬 Video Downloader\n\n"
-        f"Hey {user.first_name}! 👋\n"
+        f"Video Downloader\n\n"
+        f"Hey {user.first_name}!\n"
         f"Send me any video or music link\n"
         f"and I'll download it for you.\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🌐 Supported sites:\n"
+        f"-------------------------\n\n"
+        f"Supported sites:\n"
         f"{SITES_TEXT}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 Just paste any link to start!"
+        f"-------------------------\n\n"
+        f"Just paste any link to start!"
     )
 
     buttons = []
     if is_admin(user.id):
-        buttons.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data="admin_menu")])
-    buttons.append([InlineKeyboardButton("📊 My Stats", callback_data=f"stats_{user.id}")])
-    buttons.append([InlineKeyboardButton("❓ Help", callback_data="help_msg")])
+        buttons.append([InlineKeyboardButton("Admin Panel", callback_data="admin_menu")])
+    buttons.append([InlineKeyboardButton("My Stats", callback_data=f"stats_{user.id}")])
+    buttons.append([InlineKeyboardButton("Help", callback_data="help_msg")])
 
     await query.edit_message_text(
         text,
