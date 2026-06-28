@@ -1,5 +1,4 @@
 import os
-import io
 import time
 import shutil
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -133,7 +132,7 @@ async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. Click the extension → Export\n"
         "4. Send the .txt file here\n\n"
         "You can upload multiple files\n"
-        "(YouTube, Pornhub, etc.)\n\n"
+        "(YouTube, TikTok, etc.)\n\n"
         "⚠️ Send /skip to cancel.",
         parse_mode=ParseMode.HTML
     )
@@ -274,10 +273,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         start_time = time.time()
-        audio_stream = downloader.download_spotify(url)
+        file_path = downloader.download_spotify_to_file(url)
         elapsed = time.time() - start_time
 
-        if not audio_stream:
+        if not file_path:
             await loading.edit_text(
                 "❌ Download Failed\n\n"
                 "Could not download Spotify track.\n"
@@ -285,21 +284,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        file_size = audio_stream.getbuffer().nbytes
+        file_size = os.path.getsize(file_path)
         info = downloader.get_spotify_info(url)
         title = info.get("title", "Spotify Track") if info else "Spotify Track"
         artist = info.get("artist", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
-        temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-                audio_stream.seek(0)
-                tmp.write(audio_stream.read())
-                temp_path = tmp.name
-
-            with open(temp_path, "rb") as f:
+            with open(file_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
@@ -313,9 +306,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
-            audio_stream.close()
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            temp_parent = os.path.dirname(file_path)
+            if temp_parent and temp_parent != file_path:
+                shutil.rmtree(temp_parent, ignore_errors=True)
         return
 
     if is_soundcloud_url(url):
@@ -326,10 +319,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         start_time = time.time()
-        audio_stream = downloader.download_soundcloud(url)
+        file_path = downloader.download_soundcloud_to_file(url)
         elapsed = time.time() - start_time
 
-        if not audio_stream:
+        if not file_path:
             await loading.edit_text(
                 "❌ Download Failed\n\n"
                 "Could not download SoundCloud track.\n"
@@ -337,21 +330,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        file_size = audio_stream.getbuffer().nbytes
+        file_size = os.path.getsize(file_path)
         info = downloader.get_video_info(url)
         title = info.get("title", "SoundCloud Track") if info else "SoundCloud Track"
         artist = info.get("uploader", "Unknown") if info else "Unknown"
 
         db.log_download(chat_id, f"{artist} - {title}", url, "audio", file_size, elapsed)
 
-        temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-                audio_stream.seek(0)
-                tmp.write(audio_stream.read())
-                temp_path = tmp.name
-
-            with open(temp_path, "rb") as f:
+            with open(file_path, "rb") as f:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=f,
@@ -365,9 +352,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await loading.edit_text(f"❌ Failed to send: {str(e)[:100]}")
         finally:
-            audio_stream.close()
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            temp_parent = os.path.dirname(file_path)
+            if temp_parent and temp_parent != file_path:
+                shutil.rmtree(temp_parent, ignore_errors=True)
         return
 
     info = downloader.get_video_info(url)

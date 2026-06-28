@@ -1,4 +1,3 @@
-import io
 import os
 import re
 import json
@@ -59,27 +58,6 @@ class VideoDownloader:
         except subprocess.TimeoutExpired:
             return False, "", "Timeout"
 
-    def _run_ytdlp_stream(self, args: list, timeout: int = 300) -> Optional[io.BytesIO]:
-        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            data, stderr = proc.communicate(timeout=timeout)
-            if proc.returncode != 0 or not data:
-                print(f"[yt-dlp stream error] rc={proc.returncode} {stderr[:200]}", flush=True)
-                return None
-            buf = io.BytesIO(data)
-            buf.seek(0)
-            return buf
-        except (subprocess.TimeoutExpired, Exception):
-            if proc:
-                proc.kill()
-            return None
-
     def download_video_to_file(self, url: str, format_id: str, has_audio: bool = True) -> Optional[str]:
         temp_dir = tempfile.mkdtemp()
         output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
@@ -87,14 +65,14 @@ class VideoDownloader:
         if has_audio:
             fmt_str = format_id
         else:
-            fmt_str = f"{format_id}+bestaudio/{format_id}"
+            fmt_str = f"{format_id}+bestaudio/best"
 
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
             "-f", fmt_str,
             "--merge-output-format", "mp4",
             "-o", output_template,
             "--no-playlist",
-            "--socket-timeout", "15",
+            "--socket-timeout", "30",
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
@@ -109,18 +87,12 @@ class VideoDownloader:
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            stderr_lines = []
-            for line in proc.stderr:
-                stripped = line.strip()
-                if stripped:
-                    stderr_lines.append(stripped)
-                    if len(stderr_lines) > 50:
-                        stderr_lines = stderr_lines[-50:]
-            proc.wait(timeout=self.timeout)
+            _, stderr = proc.communicate(timeout=self.timeout)
             if proc.returncode != 0:
                 print(f"[yt-dlp file error] rc={proc.returncode}", flush=True)
-                for line in stderr_lines[-10:]:
-                    print(f"  {line}", flush=True)
+                if stderr:
+                    for line in stderr.strip().split("\n")[-10:]:
+                        print(f"  {line}", flush=True)
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
             for f in os.listdir(temp_dir):
@@ -202,7 +174,7 @@ class VideoDownloader:
             print(f"[spotify error] {e}", flush=True)
             return None
 
-    def download_spotify(self, url: str) -> Optional[io.BytesIO]:
+    def download_spotify(self, url: str) -> Optional[str]:
         temp_dir = tempfile.mkdtemp()
         ok, stdout, stderr = self._run_spotdl(url, temp_dir)
 
@@ -214,16 +186,61 @@ class VideoDownloader:
         for root, dirs, files in os.walk(temp_dir):
             for f in files:
                 if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
-                    file_path = os.path.join(root, f)
-                    with open(file_path, "rb") as fp:
-                        data = fp.read()
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    buf = io.BytesIO(data)
-                    buf.seek(0)
-                    return buf
+                    return os.path.join(root, f)
 
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
+
+    def download_spotify_to_file(self, url: str) -> Optional[str]:
+        return self.download_spotify(url)
+
+    def download_soundcloud_to_file(self, url: str) -> Optional[str]:
+        temp_dir = tempfile.mkdtemp()
+        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "-o", output_template,
+            "--no-playlist",
+        ] + YTDLP_COMMON_ARGS + [url]
+        print(f"[yt-dlp] downloading soundcloud", flush=True)
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            _, stderr = proc.communicate(timeout=self.timeout)
+            if proc.returncode != 0:
+                print(f"[yt-dlp soundcloud error] rc={proc.returncode}", flush=True)
+                if stderr:
+                    for line in stderr.strip().split("\n")[-10:]:
+                        print(f"  {line}", flush=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+            for root, dirs, files in os.walk(temp_dir):
+                for f in files:
+                    if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
+                        return os.path.join(root, f)
+            print("[yt-dlp soundcloud] no output file found", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+        except subprocess.TimeoutExpired:
+            if proc:
+                proc.kill()
+            print("[yt-dlp soundcloud] timed out", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+        except Exception as e:
+            if proc:
+                proc.kill()
+            print(f"[yt-dlp soundcloud] error: {e}", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
         ok, stdout, stderr = self._run_ytdlp([
@@ -328,30 +345,6 @@ class VideoDownloader:
                     break
 
         return options[:8]
-
-    def download_soundcloud(self, url: str) -> Optional[io.BytesIO]:
-        stream = self._run_ytdlp_stream([
-            "-f", "bestaudio",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "-o", "-",
-            "--no-playlist",
-        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
-        return stream
-
-    def download_video(self, url: str, format_id: str) -> Optional[io.BytesIO]:
-        stream = self._run_ytdlp_stream([
-            "-f", f"{format_id}+bestaudio/best",
-            "--merge-output-format", "mp4",
-            "-o", "-",
-            "--no-playlist",
-            "--socket-timeout", "15",
-            "--retries", "5",
-            "--fragment-retries", "10",
-            "--concurrent-fragments", "4",
-        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
-        return stream
 
     def cleanup(self, file_path: str):
         if file_path and os.path.exists(file_path):
