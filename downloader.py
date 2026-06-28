@@ -226,14 +226,12 @@ class VideoDownloader:
         return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
-        is_yt = "youtube.com" in url or "youtu.be" in url
-        extra_args = ["--extractor-args", "youtube:player_client=ios,web"] if is_yt else []
         ok, stdout, stderr = self._run_ytdlp([
             "--no-download",
             "--print-json",
             "--no-playlist",
             "--ignore-errors",
-        ] + extra_args + YTDLP_COMMON_ARGS + [url], timeout=90)
+        ] + YTDLP_COMMON_ARGS + [url], timeout=90)
 
         if not ok or not stdout.strip():
             print(f"[yt-dlp info error] {stderr[:500]}", flush=True)
@@ -314,7 +312,6 @@ class VideoDownloader:
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--no-progress",
-            "--extractor-args", "youtube:player_client=ios,web",
         ] + YTDLP_COMMON_ARGS + [url]
         print(f"[yt-dlp] downloading format: {format_id}", flush=True)
         result = self._run_download(cmd, temp_dir)
@@ -334,7 +331,6 @@ class VideoDownloader:
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--no-progress",
-            "--extractor-args", "youtube:player_client=ios,web",
         ] + YTDLP_COMMON_ARGS + [url]
         result = self._run_download(fallback_cmd, fallback_dir)
         if result:
