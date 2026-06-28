@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import json
@@ -41,7 +42,7 @@ class VideoDownloader:
             return False
 
     def _get_cookies_args(self) -> list:
-        if os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 50:
+        if os.path.exists(COOKIES_PATH):
             return ["--cookies", COOKIES_PATH]
         return []
 
@@ -58,7 +59,48 @@ class VideoDownloader:
         except subprocess.TimeoutExpired:
             return False, "", "Timeout"
 
-    def _run_download(self, cmd: list, temp_dir: str) -> Optional[str]:
+    def _run_ytdlp_stream(self, args: list, timeout: int = 300) -> Optional[io.BytesIO]:
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            data, stderr = proc.communicate(timeout=timeout)
+            if proc.returncode != 0 or not data:
+                print(f"[yt-dlp stream error] rc={proc.returncode} {stderr[:200]}", flush=True)
+                return None
+            buf = io.BytesIO(data)
+            buf.seek(0)
+            return buf
+        except (subprocess.TimeoutExpired, Exception):
+            if proc:
+                proc.kill()
+            return None
+
+    def download_video_to_file(self, url: str, format_id: str, has_audio: bool = True) -> Optional[str]:
+        temp_dir = tempfile.mkdtemp()
+        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+
+        if has_audio:
+            fmt_str = format_id
+        else:
+            fmt_str = f"{format_id}+bestaudio/{format_id}"
+
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
+            "-f", fmt_str,
+            "--merge-output-format", "mp4",
+            "-o", output_template,
+            "--no-playlist",
+            "--socket-timeout", "15",
+            "--retries", "5",
+            "--fragment-retries", "10",
+            "--concurrent-fragments", "4",
+            "--no-progress",
+        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        print(f"[yt-dlp] downloading: {fmt_str}", flush=True)
         proc = None
         try:
             proc = subprocess.Popen(
@@ -67,12 +109,19 @@ class VideoDownloader:
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            _, stderr = proc.communicate(timeout=self.timeout)
+            stderr_lines = []
+            for line in proc.stderr:
+                stripped = line.strip()
+                if stripped:
+                    stderr_lines.append(stripped)
+                    if len(stderr_lines) > 50:
+                        stderr_lines = stderr_lines[-50:]
+            proc.wait(timeout=self.timeout)
             if proc.returncode != 0:
-                print(f"[yt-dlp dl error] rc={proc.returncode}", flush=True)
-                if stderr:
-                    for line in stderr.strip().split("\n")[-5:]:
-                        print(f"  {line}", flush=True)
+                print(f"[yt-dlp file error] rc={proc.returncode}", flush=True)
+                for line in stderr_lines[-10:]:
+                    print(f"  {line}", flush=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
             for f in os.listdir(temp_dir):
                 fp = os.path.join(temp_dir, f)
@@ -80,17 +129,20 @@ class VideoDownloader:
                     size = os.path.getsize(fp)
                     print(f"[yt-dlp] success: {f} ({size} bytes)", flush=True)
                     return fp
-            print("[yt-dlp] no output file in temp dir", flush=True)
+            print("[yt-dlp] no output file found in temp dir", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except subprocess.TimeoutExpired:
             if proc:
                 proc.kill()
-            print("[yt-dlp] timed out", flush=True)
+            print("[yt-dlp] download timed out", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         except Exception as e:
             if proc:
                 proc.kill()
-            print(f"[yt-dlp] error: {e}", flush=True)
+            print(f"[yt-dlp] download error: {e}", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
     def _run_spotdl(self, url: str, output_dir: str) -> Tuple[bool, str, str]:
@@ -100,7 +152,6 @@ class VideoDownloader:
             "--output", output_dir,
             "--format", "mp3",
         ]
-        print(f"[spotdl] running: {url}", flush=True)
         try:
             result = subprocess.run(
                 cmd,
@@ -108,17 +159,8 @@ class VideoDownloader:
                 text=True,
                 timeout=self.timeout
             )
-            if result.returncode != 0:
-                print(f"[spotdl error] rc={result.returncode}", flush=True)
-                if result.stderr:
-                    for line in result.stderr.strip().split("\n")[-5:]:
-                        print(f"  {line}", flush=True)
             return result.returncode == 0, result.stdout, result.stderr
-        except FileNotFoundError:
-            print("[spotdl] not installed", flush=True)
-            return False, "", "spotdl not installed"
         except subprocess.TimeoutExpired:
-            print("[spotdl] timed out", flush=True)
             return False, "", "Timeout"
 
     def get_spotify_info(self, url: str) -> Optional[dict]:
@@ -135,7 +177,7 @@ class VideoDownloader:
                 timeout=60
             )
             if result.returncode != 0:
-                print(f"[spotdl info error] {result.stderr[:500]}", flush=True)
+                print(f"[spotdl error] {result.stderr[:500]}", flush=True)
                 return None
 
             output = result.stdout.strip()
@@ -156,98 +198,44 @@ class VideoDownloader:
                 "url": url,
                 "is_spotify": True,
             }
-        except FileNotFoundError:
-            print("[spotdl] not installed", flush=True)
-            return None
         except Exception as e:
-            print(f"[spotify info error] {e}", flush=True)
+            print(f"[spotify error] {e}", flush=True)
             return None
 
-    def download_spotify_to_file(self, url: str) -> Optional[str]:
+    def download_spotify(self, url: str) -> Optional[io.BytesIO]:
         temp_dir = tempfile.mkdtemp()
-        print(f"[spotdl] downloading: {url}", flush=True)
         ok, stdout, stderr = self._run_spotdl(url, temp_dir)
 
-        if ok:
-            for root, dirs, files in os.walk(temp_dir):
-                for f in files:
-                    if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
-                        fp = os.path.join(root, f)
-                        size = os.path.getsize(fp)
-                        print(f"[spotdl] success: {f} ({size} bytes)", flush=True)
-                        return fp
+        if not ok:
+            print(f"[spotdl error] {stderr[:500]}", flush=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
 
-        print("[spotdl] failed, trying yt-dlp fallback", flush=True)
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return self._download_spotify_ytdlp_fallback(url)
+        for root, dirs, files in os.walk(temp_dir):
+            for f in files:
+                if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
+                    file_path = os.path.join(root, f)
+                    with open(file_path, "rb") as fp:
+                        data = fp.read()
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    buf = io.BytesIO(data)
+                    buf.seek(0)
+                    return buf
 
-    def _download_spotify_ytdlp_fallback(self, url: str) -> Optional[str]:
-        print(f"[yt-dlp spotify] fallback for: {url}", flush=True)
-        temp_dir = tempfile.mkdtemp()
-        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
-        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", "bestaudio",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "-o", output_template,
-            "--no-playlist",
-            "--no-progress",
-        ] + YTDLP_COMMON_ARGS + [url]
-        result = self._run_download(cmd, temp_dir)
-        if result:
-            return result
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return None
-
-    def download_soundcloud_to_file(self, url: str) -> Optional[str]:
-        temp_dir = tempfile.mkdtemp()
-        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
-        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", "bestaudio",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
-            "-o", output_template,
-            "--no-playlist",
-        ] + YTDLP_COMMON_ARGS + [url]
-        print("[yt-dlp] downloading soundcloud", flush=True)
-        result = self._run_download(cmd, temp_dir)
-        if result:
-            return result
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
-        is_yt = "youtube.com" in url or "youtu.be" in url
-
-        cmd_args = [
+        ok, stdout, stderr = self._run_ytdlp([
             "--no-download",
             "--print-json",
             "--no-playlist",
             "--ignore-errors",
-        ] + YTDLP_COMMON_ARGS
+            "--no-warnings",
+        ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90)
 
-        if is_yt:
-            cmd_args += ["--extractor-args", "youtube:player_client=web_creator"]
-
-        cmd_args += [url]
-
-        ok, stdout, stderr = self._run_ytdlp(cmd_args, timeout=90)
-
-        if not ok or not stdout.strip():
-            print(f"[yt-dlp info] first attempt failed for: {url[:60]}", flush=True)
-            if stderr:
-                print(f"  {stderr[:300]}", flush=True)
-            ok, stdout, stderr = self._run_ytdlp([
-                "--no-download",
-                "--print-json",
-                "--no-playlist",
-                "--ignore-errors",
-            ] + YTDLP_COMMON_ARGS + [url], timeout=90)
-
-        if not ok or not stdout.strip():
-            print(f"[yt-dlp info error] {stderr[:500]}", flush=True)
+        if not ok:
+            print(f"[yt-dlp error] {stderr[:500]}", flush=True)
             return None
 
         try:
@@ -266,78 +254,104 @@ class VideoDownloader:
             return None
 
     def get_quality_options(self, formats: list, duration: int = 0) -> list:
-        heights = set()
+        best_by_height = {}
         for fmt in formats:
             if fmt.get("vcodec") == "none":
                 continue
-            h = fmt.get("height")
-            if h:
-                heights.add(h)
+            height = fmt.get("height")
+            if not height:
+                continue
 
-        if not heights:
-            return [{"label": "Best", "format_selector": "best", "height": 0, "filesize": 0}]
+            acodec = fmt.get("acodec")
+            has_audio = bool(acodec and acodec != "none")
+            protocol = fmt.get("protocol", "")
+            is_direct = protocol in ("https", "http")
 
-        options = []
-        for h in sorted(heights, reverse=True):
-            filesize = 0
+            quality_label = f"{height}p"
+
+            filesize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
+            if not filesize and duration:
+                tbr = fmt.get("tbr") or 0
+                vbr = fmt.get("vbr") or 0
+                abr = fmt.get("abr") or 0
+                bitrate = tbr or (vbr + abr)
+                if bitrate:
+                    filesize = int(bitrate * 1000 / 8 * duration)
+
+            if quality_label not in best_by_height:
+                best_by_height[quality_label] = {
+                    "label": quality_label,
+                    "format_id": fmt["format_id"],
+                    "height": height,
+                    "filesize": filesize,
+                    "ext": fmt.get("ext", "mp4"),
+                    "has_audio": has_audio,
+                    "is_direct": is_direct,
+                }
+            else:
+                existing = best_by_height[quality_label]
+                prefer_direct = is_direct and not existing["is_direct"]
+                prefer_audio = has_audio and not existing["has_audio"]
+                if prefer_direct or prefer_audio:
+                    best_by_height[quality_label] = {
+                        "label": quality_label,
+                        "format_id": fmt["format_id"],
+                        "height": height,
+                        "filesize": filesize or existing["filesize"],
+                        "ext": fmt.get("ext", "mp4"),
+                        "has_audio": has_audio,
+                        "is_direct": is_direct,
+                    }
+                elif filesize and filesize > existing["filesize"]:
+                    best_by_height[quality_label]["filesize"] = filesize
+
+        options = sorted(best_by_height.values(), key=lambda x: x["height"], reverse=True)
+
+        if not options:
             for fmt in formats:
-                if fmt.get("height") == h and fmt.get("vcodec") != "none":
-                    fs = fmt.get("filesize") or fmt.get("filesize_approx") or 0
-                    if not fs and duration:
+                if fmt.get("format_id") and fmt.get("vcodec") != "none":
+                    filesize = fmt.get("filesize") or 0
+                    if not filesize and duration:
                         tbr = fmt.get("tbr") or 0
                         if tbr:
-                            fs = int(tbr * 1000 / 8 * duration)
-                    if fs > filesize:
-                        filesize = fs
+                            filesize = int(tbr * 1000 / 8 * duration)
+                    acodec = fmt.get("acodec")
+                    has_audio = acodec and acodec != "none"
+                    options.append({
+                        "label": "Best Available",
+                        "format_id": fmt["format_id"],
+                        "height": 0,
+                        "filesize": filesize,
+                        "ext": fmt.get("ext", "mp4"),
+                        "has_audio": has_audio,
+                    })
                     break
-            options.append({
-                "label": f"{h}p",
-                "format_selector": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
-                "height": h,
-                "filesize": filesize,
-            })
 
         return options[:8]
 
-    def download_video_to_file(self, url: str, format_selector: str) -> Optional[str]:
-        temp_dir = tempfile.mkdtemp()
-        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
-        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", format_selector,
-            "--merge-output-format", "mp4",
-            "-o", output_template,
+    def download_soundcloud(self, url: str) -> Optional[io.BytesIO]:
+        stream = self._run_ytdlp_stream([
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "-o", "-",
             "--no-playlist",
-            "--socket-timeout", "30",
+        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
+        return stream
+
+    def download_video(self, url: str, format_id: str) -> Optional[io.BytesIO]:
+        stream = self._run_ytdlp_stream([
+            "-f", f"{format_id}+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "-o", "-",
+            "--no-playlist",
+            "--socket-timeout", "15",
             "--retries", "5",
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
-            "--no-progress",
-        ] + YTDLP_COMMON_ARGS + [url]
-        print(f"[yt-dlp] downloading: {format_selector}", flush=True)
-        result = self._run_download(cmd, temp_dir)
-        if result:
-            return result
-
-        print("[yt-dlp] format failed, trying best fallback", flush=True)
-        fallback_dir = tempfile.mkdtemp()
-        fallback_template = os.path.join(fallback_dir, "%(title).80s.%(ext)s")
-        fallback_cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", "best",
-            "--merge-output-format", "mp4",
-            "-o", fallback_template,
-            "--no-playlist",
-            "--socket-timeout", "30",
-            "--retries", "5",
-            "--fragment-retries", "10",
-            "--concurrent-fragments", "4",
-            "--no-progress",
-        ] + YTDLP_COMMON_ARGS + [url]
-        result = self._run_download(fallback_cmd, fallback_dir)
-        if result:
-            return result
-
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return None
+        ] + YTDLP_COMMON_ARGS + [url], timeout=self.timeout)
+        return stream
 
     def cleanup(self, file_path: str):
         if file_path and os.path.exists(file_path):
