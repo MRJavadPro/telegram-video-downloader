@@ -386,9 +386,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = []
     for i, opt in enumerate(quality_options):
         size_str = format_size(opt.get("filesize", 0))
-        emoji = ["1", "2", "3", "4", "5", "6", "7", "8"][i] if i < 8 else "d"
-        label = f"{emoji}. {opt['label']}  -  ~{size_str}"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"dl_{opt['format_id']}")])
+        label = f"{i+1}. {opt['label']}  -  ~{size_str}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"dl_{i}")])
 
     buttons.append([InlineKeyboardButton("Refresh", callback_data=f"refresh_{message.chat_id}")])
 
@@ -414,7 +413,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     if not data.startswith("dl_"):
         return
 
-    format_id = data[3:]
+    format_index = int(data[3:])
 
     if chat_id not in user_data:
         await query.edit_message_text(
@@ -426,14 +425,15 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     video_info = user_data[chat_id]
     url = video_info["url"]
     title = video_info["title"]
+    options = video_info["options"]
 
-    selected_option = None
-    for opt in video_info["options"]:
-        if opt["format_id"] == format_id:
-            selected_option = opt
-            break
+    if format_index < 0 or format_index >= len(options):
+        await query.edit_message_text("Invalid selection.")
+        return
 
-    quality_label = selected_option["label"] if selected_option else "best"
+    selected_option = options[format_index]
+    quality_label = selected_option["label"]
+    format_selector = selected_option["format_selector"]
 
     await query.edit_message_text(
         f"Downloading\n\n"
@@ -443,7 +443,7 @@ async def handle_quality_selection(update: Update, context: ContextTypes.DEFAULT
     )
 
     start_time = time.time()
-    file_path = downloader.download_video_to_file(url, format_id)
+    file_path = downloader.download_video_to_file(url, format_selector)
     elapsed = time.time() - start_time
 
     if not file_path:

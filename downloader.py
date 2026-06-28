@@ -1,4 +1,3 @@
-import io
 import os
 import re
 import json
@@ -44,13 +43,14 @@ class VideoDownloader:
     def _get_cookies_args(self) -> list:
         exists = os.path.exists(COOKIES_PATH)
         size = os.path.getsize(COOKIES_PATH) if exists else 0
-        print(f"[cookies check] path={COOKIES_PATH} exists={exists} size={size}", flush=True)
+        print(f"[cookies] path={COOKIES_PATH} exists={exists} size={size}", flush=True)
         if exists and size > 50:
             return ["--cookies", COOKIES_PATH]
         return []
 
     def _run_ytdlp(self, args: list, timeout: int = 60) -> Tuple[bool, str, str]:
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
+        print(f"[yt-dlp cmd] {' '.join(cmd[-5:])}", flush=True)
         try:
             result = subprocess.run(
                 cmd,
@@ -84,7 +84,7 @@ class VideoDownloader:
                     size = os.path.getsize(fp)
                     print(f"[yt-dlp] success: {f} ({size} bytes)", flush=True)
                     return fp
-            print("[yt-dlp] no output file found in temp dir", flush=True)
+            print("[yt-dlp] no output file in temp dir", flush=True)
             return None
         except subprocess.TimeoutExpired:
             if proc:
@@ -117,12 +117,9 @@ class VideoDownloader:
                 if result.stderr:
                     for line in result.stderr.strip().split("\n")[-5:]:
                         print(f"  {line}", flush=True)
-                if result.stdout:
-                    for line in result.stdout.strip().split("\n")[-3:]:
-                        print(f"  out: {line}", flush=True)
             return result.returncode == 0, result.stdout, result.stderr
         except FileNotFoundError:
-            print("[spotdl] command not found - spotdl not installed", flush=True)
+            print("[spotdl] not installed", flush=True)
             return False, "", "spotdl not installed"
         except subprocess.TimeoutExpired:
             print("[spotdl] timed out", flush=True)
@@ -164,7 +161,7 @@ class VideoDownloader:
                 "is_spotify": True,
             }
         except FileNotFoundError:
-            print("[spotdl] command not found", flush=True)
+            print("[spotdl] not installed", flush=True)
             return None
         except Exception as e:
             print(f"[spotify info error] {e}", flush=True)
@@ -218,7 +215,7 @@ class VideoDownloader:
             "-o", output_template,
             "--no-playlist",
         ] + YTDLP_COMMON_ARGS + [url]
-        print(f"[yt-dlp] downloading soundcloud", flush=True)
+        print("[yt-dlp] downloading soundcloud", flush=True)
         result = self._run_download(cmd, temp_dir)
         if result:
             return result
@@ -253,57 +250,44 @@ class VideoDownloader:
             return None
 
     def get_quality_options(self, formats: list, duration: int = 0) -> list:
-        seen_qualities = {}
+        heights = set()
         for fmt in formats:
             if fmt.get("vcodec") == "none":
                 continue
-            height = fmt.get("height")
-            if not height:
-                continue
-            quality_label = f"{height}p"
-            if quality_label not in seen_qualities:
-                filesize = fmt.get("filesize") or fmt.get("filesize_approx") or 0
-                if not filesize and duration:
-                    tbr = fmt.get("tbr") or 0
-                    vbr = fmt.get("vbr") or 0
-                    abr = fmt.get("abr") or 0
-                    bitrate = tbr or (vbr + abr)
-                    if bitrate:
-                        filesize = int(bitrate * 1000 / 8 * duration)
-                seen_qualities[quality_label] = {
-                    "label": quality_label,
-                    "format_id": fmt["format_id"],
-                    "height": height,
-                    "filesize": filesize,
-                    "ext": fmt.get("ext", "mp4"),
-                }
+            h = fmt.get("height")
+            if h:
+                heights.add(h)
 
-        options = sorted(seen_qualities.values(), key=lambda x: x["height"], reverse=True)
+        if not heights:
+            return [{"label": "Best", "format_selector": "best", "height": 0, "filesize": 0}]
 
-        if not options:
+        options = []
+        for h in sorted(heights, reverse=True):
+            filesize = 0
             for fmt in formats:
-                if fmt.get("format_id") and fmt.get("vcodec") != "none":
-                    filesize = fmt.get("filesize") or 0
-                    if not filesize and duration:
+                if fmt.get("height") == h and fmt.get("vcodec") != "none":
+                    fs = fmt.get("filesize") or fmt.get("filesize_approx") or 0
+                    if not fs and duration:
                         tbr = fmt.get("tbr") or 0
                         if tbr:
-                            filesize = int(tbr * 1000 / 8 * duration)
-                    options.append({
-                        "label": "Best Available",
-                        "format_id": fmt["format_id"],
-                        "height": 0,
-                        "filesize": filesize,
-                        "ext": fmt.get("ext", "mp4"),
-                    })
+                            fs = int(tbr * 1000 / 8 * duration)
+                    if fs > filesize:
+                        filesize = fs
                     break
+            options.append({
+                "label": f"{h}p",
+                "format_selector": f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best",
+                "height": h,
+                "filesize": filesize,
+            })
 
         return options[:8]
 
-    def download_video_to_file(self, url: str, format_id: str) -> Optional[str]:
+    def download_video_to_file(self, url: str, format_selector: str) -> Optional[str]:
         temp_dir = tempfile.mkdtemp()
         output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", f"{format_id}+bestaudio/best",
+            "-f", format_selector,
             "--merge-output-format", "mp4",
             "-o", output_template,
             "--no-playlist",
@@ -313,16 +297,16 @@ class VideoDownloader:
             "--concurrent-fragments", "4",
             "--no-progress",
         ] + YTDLP_COMMON_ARGS + [url]
-        print(f"[yt-dlp] downloading format: {format_id}", flush=True)
+        print(f"[yt-dlp] downloading: {format_selector}", flush=True)
         result = self._run_download(cmd, temp_dir)
         if result:
             return result
 
-        print("[yt-dlp] specific format failed, trying best fallback", flush=True)
+        print("[yt-dlp] format failed, trying best fallback", flush=True)
         fallback_dir = tempfile.mkdtemp()
         fallback_template = os.path.join(fallback_dir, "%(title).80s.%(ext)s")
         fallback_cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-f", "best",
             "--merge-output-format", "mp4",
             "-o", fallback_template,
             "--no-playlist",
