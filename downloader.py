@@ -16,6 +16,9 @@ YTDLP_COMMON_ARGS = [
     "--legacy-server-connect",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "--add-header", "Accept-Language:en-US,en;q=0.9",
+]
+
+YTDLP_YT_BYPASS_ARGS = [
     "--extractor-args", "youtube:player_client=ios,web,mweb",
 ]
 
@@ -63,13 +66,8 @@ class VideoDownloader:
         temp_dir = tempfile.mkdtemp()
         output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
 
-        if has_audio:
-            fmt_str = format_id
-        else:
-            fmt_str = f"{format_id}+bestaudio/best"
-
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
-            "-f", fmt_str,
+            "-f", f"{format_id}+bestaudio/best",
             "--merge-output-format", "mp4",
             "-o", output_template,
             "--no-playlist",
@@ -78,13 +76,13 @@ class VideoDownloader:
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--no-progress",
-        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
-        print(f"[yt-dlp] downloading: {fmt_str}", flush=True)
+        ] + YTDLP_COMMON_ARGS + [url]
+        print(f"[yt-dlp] downloading: {format_id}", flush=True)
         result = self._run_download(cmd, temp_dir)
         if result:
             return result
 
-        print("[yt-dlp] first format failed, trying best fallback", flush=True)
+        print("[yt-dlp] specific format failed, trying best fallback", flush=True)
         fallback_dir = tempfile.mkdtemp()
         fallback_template = os.path.join(fallback_dir, "%(title).80s.%(ext)s")
         fallback_cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
@@ -97,7 +95,7 @@ class VideoDownloader:
             "--fragment-retries", "10",
             "--concurrent-fragments", "4",
             "--no-progress",
-        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        ] + YTDLP_COMMON_ARGS + [url]
         result = self._run_download(fallback_cmd, fallback_dir)
         if result:
             return result
@@ -237,7 +235,7 @@ class VideoDownloader:
             "-o", output_template,
             "--no-playlist",
             "--no-progress",
-        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        ] + YTDLP_COMMON_ARGS + [url]
         result = self._run_download(cmd, temp_dir)
         if result:
             return result
@@ -301,19 +299,17 @@ class VideoDownloader:
             "--print-json",
             "--no-playlist",
             "--ignore-errors",
-            "--no-warnings",
-        ] + [a for a in YTDLP_COMMON_ARGS if a != "--no-warnings"] + [url], timeout=90)
+        ] + YTDLP_COMMON_ARGS + YTDLP_YT_BYPASS_ARGS + [url], timeout=90)
 
         if not ok or not stdout.strip():
-            print(f"[yt-dlp info fallback] first attempt failed, trying with different player", flush=True)
+            print(f"[yt-dlp info fallback] first attempt failed, trying web_creator", flush=True)
             ok, stdout, stderr = self._run_ytdlp([
                 "--no-download",
                 "--print-json",
                 "--no-playlist",
                 "--ignore-errors",
-                "--no-warnings",
                 "--extractor-args", "youtube:player_client=web_creator",
-            ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings", "--extractor-args", "youtube:player_client=ios,web,mweb")] + [url], timeout=90)
+            ] + YTDLP_COMMON_ARGS + [url], timeout=90)
 
         if not ok or not stdout.strip():
             print(f"[yt-dlp error] {stderr[:500]}", flush=True)

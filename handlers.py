@@ -140,10 +140,11 @@ async def cookies_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_cookies"):
+    if not is_admin(update.effective_user.id):
         return False
 
-    context.user_data["awaiting_cookies"] = False
+    if context.user_data.get("awaiting_cookies"):
+        context.user_data["awaiting_cookies"] = False
 
     if update.message.text and update.message.text.strip() == "/skip":
         await update.message.reply_text("❌ Cookie upload cancelled.")
@@ -152,6 +153,10 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not update.message.document:
         await update.message.reply_text("❌ Please send a .txt file.")
         return True
+
+    filename = update.message.document.file_name or ""
+    if not filename.endswith(".txt"):
+        return False
 
     file = await update.message.document.get_file()
     content = await file.download_as_bytearray()
