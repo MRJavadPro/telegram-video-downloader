@@ -41,16 +41,12 @@ class VideoDownloader:
             return False
 
     def _get_cookies_args(self) -> list:
-        exists = os.path.exists(COOKIES_PATH)
-        size = os.path.getsize(COOKIES_PATH) if exists else 0
-        print(f"[cookies] path={COOKIES_PATH} exists={exists} size={size}", flush=True)
-        if exists and size > 50:
+        if os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 50:
             return ["--cookies", COOKIES_PATH]
         return []
 
     def _run_ytdlp(self, args: list, timeout: int = 60) -> Tuple[bool, str, str]:
         cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + args
-        print(f"[yt-dlp cmd] {' '.join(cmd[-5:])}", flush=True)
         try:
             result = subprocess.run(
                 cmd,
@@ -89,12 +85,12 @@ class VideoDownloader:
         except subprocess.TimeoutExpired:
             if proc:
                 proc.kill()
-            print("[yt-dlp] download timed out", flush=True)
+            print("[yt-dlp] timed out", flush=True)
             return None
         except Exception as e:
             if proc:
                 proc.kill()
-            print(f"[yt-dlp] download error: {e}", flush=True)
+            print(f"[yt-dlp] error: {e}", flush=True)
             return None
 
     def _run_spotdl(self, url: str, output_dir: str) -> Tuple[bool, str, str]:
@@ -223,12 +219,32 @@ class VideoDownloader:
         return None
 
     def get_video_info(self, url: str) -> Optional[dict]:
-        ok, stdout, stderr = self._run_ytdlp([
+        is_yt = "youtube.com" in url or "youtu.be" in url
+
+        cmd_args = [
             "--no-download",
             "--print-json",
             "--no-playlist",
             "--ignore-errors",
-        ] + YTDLP_COMMON_ARGS + [url], timeout=90)
+        ] + YTDLP_COMMON_ARGS
+
+        if is_yt:
+            cmd_args += ["--extractor-args", "youtube:player_client=web_creator"]
+
+        cmd_args += [url]
+
+        ok, stdout, stderr = self._run_ytdlp(cmd_args, timeout=90)
+
+        if not ok or not stdout.strip():
+            print(f"[yt-dlp info] first attempt failed for: {url[:60]}", flush=True)
+            if stderr:
+                print(f"  {stderr[:300]}", flush=True)
+            ok, stdout, stderr = self._run_ytdlp([
+                "--no-download",
+                "--print-json",
+                "--no-playlist",
+                "--ignore-errors",
+            ] + YTDLP_COMMON_ARGS + [url], timeout=90)
 
         if not ok or not stdout.strip():
             print(f"[yt-dlp info error] {stderr[:500]}", flush=True)
