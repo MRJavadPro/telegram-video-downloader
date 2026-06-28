@@ -207,6 +207,8 @@ async def handle_cookies_file(update: Update, context: ContextTypes.DEFAULT_TYPE
         os.makedirs(os.path.dirname(COOKIES_PATH) or ".", exist_ok=True)
         with open(COOKIES_PATH, "w", encoding="utf-8") as f:
             f.write(fixed_content)
+        actual_size = os.path.getsize(COOKIES_PATH)
+        print(f"[cookies] Saved {actual_size} bytes to {COOKIES_PATH}, {len(fixed_lines)} lines", flush=True)
         db.set_setting("cookies", fixed_content)
 
         domain_list = sorted(domains)

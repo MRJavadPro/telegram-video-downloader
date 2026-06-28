@@ -42,7 +42,10 @@ class VideoDownloader:
             return False
 
     def _get_cookies_args(self) -> list:
-        if os.path.exists(COOKIES_PATH):
+        exists = os.path.exists(COOKIES_PATH)
+        size = os.path.getsize(COOKIES_PATH) if exists else 0
+        print(f"[cookies check] path={COOKIES_PATH} exists={exists} size={size}", flush=True)
+        if exists and size > 50:
             return ["--cookies", COOKIES_PATH]
         return []
 
