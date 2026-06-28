@@ -199,18 +199,48 @@ class VideoDownloader:
 
     def download_spotify(self, url: str) -> Optional[str]:
         temp_dir = tempfile.mkdtemp()
+        print(f"[spotdl] downloading: {url}", flush=True)
         ok, stdout, stderr = self._run_spotdl(url, temp_dir)
 
         if not ok:
-            print(f"[spotdl error] {stderr[:500]}", flush=True)
+            print(f"[spotdl error] rc≠0", flush=True)
+            if stderr:
+                for line in stderr.strip().split("\n")[-5:]:
+                    print(f"  {line}", flush=True)
+            if stdout:
+                for line in stdout.strip().split("\n")[-3:]:
+                    print(f"  out: {line}", flush=True)
             shutil.rmtree(temp_dir, ignore_errors=True)
-            return None
+            return self._download_spotify_ytdlp_fallback(url)
 
         for root, dirs, files in os.walk(temp_dir):
             for f in files:
                 if f.endswith(('.mp3', '.m4a', '.opus', '.wav', '.flac')):
-                    return os.path.join(root, f)
+                    fp = os.path.join(root, f)
+                    size = os.path.getsize(fp)
+                    print(f"[spotdl] success: {f} ({size} bytes)", flush=True)
+                    return fp
 
+        print(f"[spotdl] no audio file found in temp dir, files: {os.listdir(temp_dir)}", flush=True)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return self._download_spotify_ytdlp_fallback(url)
+
+    def _download_spotify_ytdlp_fallback(self, url: str) -> Optional[str]:
+        print(f"[yt-dlp spotify] trying fallback for: {url}", flush=True)
+        temp_dir = tempfile.mkdtemp()
+        output_template = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+        cmd = [sys.executable, "-m", "yt_dlp"] + self._get_cookies_args() + [
+            "-f", "bestaudio",
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "-o", output_template,
+            "--no-playlist",
+            "--no-progress",
+        ] + [a for a in YTDLP_COMMON_ARGS if a not in ("--no-warnings",)] + [url]
+        result = self._run_download(cmd, temp_dir)
+        if result:
+            return result
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
 

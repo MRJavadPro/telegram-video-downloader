@@ -260,6 +260,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    url = url.split("?si=")[0].rstrip("/")
+
     loading = await message.reply_text(
         "⏳ Fetching...\n\n"
         "🔍 Analyzing link..."
