@@ -137,6 +137,9 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
         "-o", outtmpl,
     ]
 
+    if cookies_file and os.path.isfile(cookies_file):
+        cmd += ["--cookies", cookies_file]
+
     if platform == "youtube":
         cmd += [
             "--extractor-args", "youtube:player_client=ios,web,mweb",
@@ -144,14 +147,11 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
             "--merge-output-format", "mp4",
         ]
     elif platform == "instagram":
-        cmd += ["-f", "best", "--cookies", cookies_file] if cookies_file else ["-f", "best"]
+        cmd += ["-f", "best"]
     elif platform == "pinterest":
         cmd += ["-f", "best"]
     elif platform == "soundcloud":
         cmd += ["-f", "bestaudio/best", "--audio-format", "mp3"]
-
-    if cookies_file and platform != "instagram":
-        cmd += ["--cookies", cookies_file]
 
     cmd.append(url)
 

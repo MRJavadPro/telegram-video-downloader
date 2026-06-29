@@ -19,6 +19,13 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 COOKIES_FILE = os.getenv("COOKIES_FILE")
 
+if COOKIES_FILE and not os.path.isabs(COOKIES_FILE):
+    COOKIES_FILE = os.path.join(os.path.dirname(__file__), COOKIES_FILE)
+if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
+    logger.info(f"Cookies file found: {COOKIES_FILE}")
+else:
+    logger.warning(f"Cookies file not found: {COOKIES_FILE}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
