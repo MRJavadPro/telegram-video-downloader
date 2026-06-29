@@ -142,7 +142,6 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
 
     if platform == "youtube":
         cmd += [
-            "--extractor-args", "youtube:player_client=ios,web,mweb",
             "-f", "best",
             "--merge-output-format", "mp4",
         ]
