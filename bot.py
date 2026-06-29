@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
 import database as db
@@ -21,7 +22,7 @@ COOKIES_FILE = os.getenv("COOKIES_FILE")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 
