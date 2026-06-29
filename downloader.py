@@ -53,6 +53,9 @@ def get_info(url: str, cookies_file: str = None) -> dict:
     if platform == "spotify":
         return _get_spotify_info(url)
 
+    if platform == "pinterest":
+        return _get_pinterest_info(url)
+
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-download",
@@ -122,12 +125,63 @@ def _get_spotify_info(url: str) -> dict:
         }
 
 
+def _resolve_pinterest_url(url: str) -> str:
+    if "pin.it" in url:
+        resp = httpx.get(url, follow_redirects=True, timeout=15)
+        return str(resp.url)
+    return url
+
+
+def _get_pinterest_info(url: str) -> dict:
+    url = _resolve_pinterest_url(url)
+    resp = httpx.get(url, timeout=15, follow_redirects=True)
+    match = re.search(r'<meta property="og:title" content="([^"]*)"', resp.text)
+    title = match.group(1) if match else "Pinterest Pin"
+    img_match = re.search(r'<meta property="og:image" content="([^"]*)"', resp.text)
+    img_url = img_match.group(1) if img_match else None
+    vid_match = re.search(r'"video_url"\s*:\s*"([^"]+)"', resp.text)
+    vid_url = vid_match.group(1).replace("\\u002F", "/") if vid_match else None
+    return {
+        "title": title,
+        "duration": None,
+        "thumbnail": img_url,
+        "filesize": None,
+        "platform": "pinterest",
+        "url": url,
+        "_pinterest_video": vid_url,
+        "_pinterest_image": img_url,
+    }
+
+
+def _download_pinterest(url: str) -> tuple[str, str]:
+    url = _resolve_pinterest_url(url)
+    info = _get_pinterest_info(url)
+    vid_url = info.get("_pinterest_video")
+    img_url = info.get("_pinterest_image")
+    if vid_url:
+        resp = httpx.get(vid_url, timeout=30, follow_redirects=True)
+        filepath = os.path.join(TEMP_DIR, f"pinterest_{os.urandom(4).hex()}.mp4")
+        with open(filepath, "wb") as f:
+            f.write(resp.content)
+        return filepath, ".mp4"
+    if img_url:
+        resp = httpx.get(img_url, timeout=30, follow_redirects=True)
+        filepath = os.path.join(TEMP_DIR, f"pinterest_{os.urandom(4).hex()}.jpg")
+        with open(filepath, "wb") as f:
+            f.write(resp.content)
+        return filepath, ".jpg"
+    raise Exception("No downloadable content found on Pinterest")
+
+
 def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tuple[str, str]:
     platform = detect_platform(url)
     outtmpl = os.path.join(TEMP_DIR, "%(id)s.%(ext)s")
 
     if platform == "spotify":
         return _download_spotify(url)
+
+    if platform == "pinterest":
+        return _download_pinterest(url)
 
     cmd = [
         sys.executable, "-m", "yt_dlp",
@@ -217,7 +271,7 @@ def _find_downloaded_file(directory: str, url: str) -> str | None:
     for f in files:
         if f.is_file() and f.suffix in (
             ".mp4", ".mkv", ".webm", ".mp3", ".m4a", ".opus",
-            ".wav", ".flac", ".ogg",
+            ".wav", ".flac", ".ogg", ".jpg", ".jpeg", ".png", ".webp",
         ):
             return str(f)
     return None

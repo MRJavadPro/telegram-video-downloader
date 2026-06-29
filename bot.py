@@ -77,6 +77,8 @@ async def _send_file(message: Message, filepath: str, caption: str):
             await message.answer_audio(file, caption=caption)
         elif ext in (".mp4", ".mkv", ".webm"):
             await message.answer_video(file, caption=caption)
+        elif ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            await message.answer_photo(file, caption=caption)
         else:
             await message.answer_document(file, caption=caption)
     except Exception as e:
