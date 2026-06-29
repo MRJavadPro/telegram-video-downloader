@@ -57,10 +57,7 @@ def get_info(url: str, cookies_file: str = None) -> dict:
         return _get_pinterest_info(url)
 
     if platform == "instagram":
-        try:
-            return _get_instagram_info(url, cookies_file)
-        except Exception:
-            pass
+        return _get_instagram_info(url, cookies_file)
 
     cmd = [
         sys.executable, "-m", "yt_dlp",
@@ -164,42 +161,52 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
         raise Exception("Cannot extract Instagram shortcode from URL")
 
     headers = {
-        "User-Agent": "Instagram 219.0.0.12.117 (Android; 12; SM-G991B; 330; en_US; 533455358; 161343606)",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
         "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
     }
 
     api_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
-    resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
-
-    if resp.status_code == 200:
-        try:
+    try:
+        resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
+        if resp.status_code == 200:
             data = resp.json()
-            media = data.get("graphql", {}).get("shortcode_media") or data.get("items", [{}])[0] if data.get("items") else data.get("graphql", {}).get("shortcode_media", {})
-            title = media.get("accessibility_caption", "Instagram") or "Instagram"
-            if media.get("video_url"):
-                return {
-                    "title": title[:100],
-                    "duration": media.get("video_duration"),
-                    "thumbnail": media.get("thumbnail_src"),
-                    "filesize": None,
-                    "platform": "instagram",
-                    "url": url,
-                    "_ig_video": media["video_url"],
-                    "_ig_image": None,
-                }
-            elif media.get("display_url"):
-                return {
-                    "title": title[:100],
-                    "duration": None,
-                    "thumbnail": media.get("thumbnail_src"),
-                    "filesize": None,
-                    "platform": "instagram",
-                    "url": url,
-                    "_ig_video": None,
-                    "_ig_image": media["display_url"],
-                }
-        except Exception:
-            pass
+            media = None
+            if "graphql" in data:
+                media = data["graphql"].get("shortcode_media")
+            elif "items" in data and data["items"]:
+                media = data["items"][0]
+            if media:
+                title = media.get("accessibility_caption", "Instagram") or "Instagram"
+                if media.get("video_url"):
+                    return {
+                        "title": title[:100],
+                        "duration": media.get("video_duration"),
+                        "thumbnail": media.get("thumbnail_src") or media.get("image_versions2", {}).get("candidates", [{}])[0].get("url"),
+                        "filesize": None,
+                        "platform": "instagram",
+                        "url": url,
+                        "_ig_video": media["video_url"],
+                        "_ig_image": None,
+                    }
+                display_url = media.get("display_url")
+                if not display_url and "image_versions2" in media:
+                    candidates = media["image_versions2"].get("candidates", [])
+                    if candidates:
+                        display_url = candidates[0].get("url")
+                if display_url:
+                    return {
+                        "title": title[:100],
+                        "duration": None,
+                        "thumbnail": display_url,
+                        "filesize": None,
+                        "platform": "instagram",
+                        "url": url,
+                        "_ig_video": None,
+                        "_ig_image": display_url,
+                    }
+    except Exception:
+        pass
 
     return _get_instagram_info_fallback(url, cookies_dict)
 
@@ -241,23 +248,27 @@ def _download_instagram(url: str, cookies_file: str = None) -> tuple[str, str]:
 
     cookies_dict = _get_instagram_cookies(cookies_file)
     headers = {
-        "User-Agent": "Instagram 219.0.0.12.117 (Android; 12; SM-G991B; 330; en_US; 533455358; 161343606)",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
         "X-IG-App-ID": "936619743392459",
     }
 
     if vid_url:
         resp = httpx.get(vid_url, headers=headers, cookies=cookies_dict, timeout=60, follow_redirects=True)
-        filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.mp4")
-        with open(filepath, "wb") as f:
-            f.write(resp.content)
-        return filepath, ".mp4"
+        if resp.status_code == 200 and len(resp.content) > 1000:
+            filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.mp4")
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            return filepath, ".mp4"
+        raise Exception("Failed to download Instagram video")
 
     if img_url:
         resp = httpx.get(img_url, headers=headers, cookies=cookies_dict, timeout=30, follow_redirects=True)
-        filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.jpg")
-        with open(filepath, "wb") as f:
-            f.write(resp.content)
-        return filepath, ".jpg"
+        if resp.status_code == 200 and len(resp.content) > 1000:
+            filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.jpg")
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            return filepath, ".jpg"
+        raise Exception("Failed to download Instagram image")
 
     raise Exception("No downloadable content found on Instagram")
 
@@ -321,10 +332,7 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
         return _download_pinterest(url)
 
     if platform == "instagram":
-        try:
-            return _download_instagram(url, cookies_file)
-        except Exception:
-            pass
+        return _download_instagram(url, cookies_file)
 
     cmd = [
         sys.executable, "-m", "yt_dlp",
