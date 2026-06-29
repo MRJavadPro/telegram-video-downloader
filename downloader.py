@@ -5,9 +5,12 @@ import tempfile
 import shutil
 import re
 import json
+import logging
 from pathlib import Path
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 TEMP_DIR = tempfile.gettempdir()
@@ -180,6 +183,8 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
         follow_redirects=True,
     )
 
+    logger.info(f"Instagram graphql status: {resp.status_code}, cookies: {len(cookies_dict)}")
+
     if resp.status_code == 200:
         try:
             data = resp.json()
@@ -227,6 +232,7 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
     ]:
         try:
             resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
+            logger.info(f"Instagram API {api_url}: status {resp.status_code}")
             if resp.status_code != 200:
                 continue
             data = resp.json()
