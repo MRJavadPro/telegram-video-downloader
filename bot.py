@@ -5,7 +5,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, FSInputFile
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
@@ -26,7 +26,9 @@ bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 
-URL_PATTERN = r'https?://[^\s<>"{}|\\^`\[\]]+'
+
+def _is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
 
 
 def _format_duration(seconds: int | None) -> str:
@@ -89,7 +91,9 @@ def _cleanup(filepath: str):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    db.increment_downloads(message.from_user.id, message.from_user.username or "")
+    if db.is_banned(message.from_user.id):
+        await message.answer("You are banned from using this bot.")
+        return
     text = (
         "<b>Media Downloader Bot</b>\n\n"
         "Send me a link and I'll download it for you.\n\n"
@@ -106,6 +110,9 @@ async def cmd_start(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
+    if db.is_banned(message.from_user.id):
+        await message.answer("You are banned from using this bot.")
+        return
     text = (
         "<b>How to use:</b>\n\n"
         "1. Copy a link from a supported platform\n"
@@ -121,6 +128,9 @@ async def cmd_help(message: Message):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
+    if db.is_banned(message.from_user.id):
+        await message.answer("You are banned from using this bot.")
+        return
     count = db.get_stats(message.from_user.id)
     total = db.get_total_stats()
     await message.answer(
@@ -128,8 +138,136 @@ async def cmd_stats(message: Message):
     )
 
 
+@router.message(Command("admin"))
+async def cmd_admin(message: Message, command: CommandObject):
+    if not _is_admin(message.from_user.id):
+        return
+    total_users = db.get_total_users()
+    total_downloads = db.get_total_stats()
+    banned = db.get_banned_users()
+    text = (
+        f"<b>Admin Panel</b>\n\n"
+        f"Total users: {total_users}\n"
+        f"Total downloads: {total_downloads}\n"
+        f"Banned users: {len(banned)}\n\n"
+        f"<b>Admin commands:</b>\n"
+        f"/users - List all users\n"
+        f"/history &lt;user_id&gt; - User download history\n"
+        f"/ban &lt;user_id&gt; [reason] - Ban user\n"
+        f"/unban &lt;user_id&gt; - Unban user\n"
+        f"/banned - List banned users"
+    )
+    await message.answer(text)
+
+
+@router.message(Command("users"))
+async def cmd_users(message: Message):
+    if not _is_admin(message.from_user.id):
+        return
+    users = db.get_all_users()
+    if not users:
+        await message.answer("No users yet.")
+        return
+    lines = ["<b>All Users:</b>\n"]
+    for i, u in enumerate(users, 1):
+        name = u.get("full_name") or u.get("username") or "Unknown"
+        uname = f" @{u['username']}" if u.get("username") else ""
+        lines.append(
+            f"{i}. <code>{u['user_id']}</code> - {name}{uname}\n"
+            f"   Downloads: {u['download_count']}"
+        )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await message.answer(text)
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message, command: CommandObject):
+    if not _is_admin(message.from_user.id):
+        return
+    args = command.args
+    if not args or not args.strip().isdigit():
+        await message.answer("Usage: /history &lt;user_id&gt;")
+        return
+    user_id = int(args.strip())
+    history = db.get_user_history(user_id)
+    if not history:
+        await message.answer(f"No downloads found for user <code>{user_id}</code>.")
+        return
+    lines = [f"<b>History for {user_id}:</b>\n"]
+    for h in history:
+        lines.append(
+            f"[{_platform_emoji(h['platform'])}] {h['title']}\n"
+            f"<code>{h['timestamp']}</code>"
+        )
+    text = "\n\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await message.answer(text)
+
+
+@router.message(Command("ban"))
+async def cmd_ban(message: Message, command: CommandObject):
+    if not _is_admin(message.from_user.id):
+        return
+    args = command.args
+    if not args:
+        await message.answer("Usage: /ban &lt;user_id&gt; [reason]")
+        return
+    parts = args.split(maxsplit=1)
+    user_id_str = parts[0]
+    reason = parts[1] if len(parts) > 1 else ""
+    if not user_id_str.isdigit():
+        await message.answer("User ID must be a number.")
+        return
+    user_id = int(user_id_str)
+    if user_id in ADMIN_IDS:
+        await message.answer("Cannot ban an admin.")
+        return
+    db.ban_user(user_id, message.from_user.id, reason)
+    await message.answer(f"User <code>{user_id}</code> has been banned.")
+
+
+@router.message(Command("unban"))
+async def cmd_unban(message: Message, command: CommandObject):
+    if not _is_admin(message.from_user.id):
+        return
+    args = command.args
+    if not args or not args.strip().isdigit():
+        await message.answer("Usage: /unban &lt;user_id&gt;")
+        return
+    user_id = int(args.strip())
+    db.unban_user(user_id)
+    await message.answer(f"User <code>{user_id}</code> has been unbanned.")
+
+
+@router.message(Command("banned"))
+async def cmd_banned(message: Message):
+    if not _is_admin(message.from_user.id):
+        return
+    banned = db.get_banned_users()
+    if not banned:
+        await message.answer("No banned users.")
+        return
+    lines = ["<b>Banned Users:</b>\n"]
+    for b in banned:
+        name = b.get("full_name") or b.get("username") or "Unknown"
+        reason = f" - {b['reason']}" if b.get("reason") else ""
+        lines.append(
+            f"<code>{b['user_id']}</code> - {name}{reason}\n"
+            f"Banned: {b['timestamp']}"
+        )
+    text = "\n\n".join(lines)
+    await message.answer(text)
+
+
 @router.message(F.text)
 async def handle_message(message: Message):
+    if db.is_banned(message.from_user.id):
+        await message.answer("You are banned from using this bot.")
+        return
+
     text = message.text.strip()
     if not text or not text.startswith("http"):
         await message.answer("Send me a valid URL to download.")
@@ -173,7 +311,17 @@ async def handle_message(message: Message):
     await _send_file(message, filepath, caption)
     await status.delete()
 
-    db.increment_downloads(message.from_user.id, message.from_user.username or "")
+    db.increment_downloads(
+        message.from_user.id,
+        message.from_user.username or "",
+        message.from_user.full_name or "",
+    )
+    db.log_download(
+        message.from_user.id,
+        platform,
+        info["title"],
+        text,
+    )
 
 
 async def main():
