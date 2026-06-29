@@ -133,15 +133,28 @@ def _get_spotify_info(url: str) -> dict:
 
 def _get_instagram_cookies(cookies_file: str) -> dict:
     cookies_dict = {}
+    content = None
+
     if cookies_file and os.path.isfile(cookies_file):
         with open(cookies_file) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("\t")
-                if len(parts) >= 7 and "instagram.com" in parts[0]:
-                    cookies_dict[parts[5]] = parts[6]
+            content = f.read()
+    elif cookies_file and not os.path.isfile(cookies_file):
+        logger.warning(f"Cookies file not found: {cookies_file}")
+        return cookies_dict
+    else:
+        return cookies_dict
+
+    if not content:
+        return cookies_dict
+
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 7 and "instagram.com" in parts[0]:
+            cookies_dict[parts[5]] = parts[6]
+    logger.info(f"Loaded {len(cookies_dict)} Instagram cookies")
     return cookies_dict
 
 

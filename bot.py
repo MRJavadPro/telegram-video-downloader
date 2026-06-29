@@ -21,13 +21,20 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 COOKIES_FILE = os.getenv("COOKIES_FILE")
+COOKIES_CONTENT = os.getenv("COOKIES_CONTENT")
 
 if COOKIES_FILE and not os.path.isabs(COOKIES_FILE):
     COOKIES_FILE = os.path.join(os.path.dirname(__file__), COOKIES_FILE)
 if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
     logger.info(f"Cookies file found: {COOKIES_FILE}")
+elif COOKIES_CONTENT:
+    cookies_path = os.path.join(os.path.dirname(__file__), "cookies.txt")
+    with open(cookies_path, "w") as f:
+        f.write(COOKIES_CONTENT)
+    COOKIES_FILE = cookies_path
+    logger.info(f"Cookies written from env var to: {COOKIES_FILE}")
 else:
-    logger.warning(f"Cookies file not found: {COOKIES_FILE}")
+    logger.warning("No cookies configured")
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
