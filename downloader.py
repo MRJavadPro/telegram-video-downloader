@@ -161,84 +161,64 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
         raise Exception("Cannot extract Instagram shortcode from URL")
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+        "User-Agent": "Instagram 275.0.0.27.98 (iPhone13,3; iOS 16_6; en_US; en-US; scale=3.00; 1170x2532; 458229258) AppleWebKit/420+",
         "X-IG-App-ID": "936619743392459",
-        "X-Requested-With": "XMLHttpRequest",
     }
 
-    api_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
-    try:
-        resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
-        if resp.status_code == 200:
+    for api_url in [
+        f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis",
+        f"https://www.instagram.com/p/{shortcode}/?__a=1",
+        f"https://i.instagram.com/api/v1/media/{shortcode}/info/",
+    ]:
+        try:
+            resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
+            if resp.status_code != 200:
+                continue
             data = resp.json()
             media = None
             if "graphql" in data:
                 media = data["graphql"].get("shortcode_media")
             elif "items" in data and data["items"]:
                 media = data["items"][0]
-            if media:
-                title = media.get("accessibility_caption", "Instagram") or "Instagram"
-                if media.get("video_url"):
-                    return {
-                        "title": title[:100],
-                        "duration": media.get("video_duration"),
-                        "thumbnail": media.get("thumbnail_src") or media.get("image_versions2", {}).get("candidates", [{}])[0].get("url"),
-                        "filesize": None,
-                        "platform": "instagram",
-                        "url": url,
-                        "_ig_video": media["video_url"],
-                        "_ig_image": None,
-                    }
-                display_url = media.get("display_url")
-                if not display_url and "image_versions2" in media:
-                    candidates = media["image_versions2"].get("candidates", [])
-                    if candidates:
-                        display_url = candidates[0].get("url")
-                if display_url:
-                    return {
-                        "title": title[:100],
-                        "duration": None,
-                        "thumbnail": display_url,
-                        "filesize": None,
-                        "platform": "instagram",
-                        "url": url,
-                        "_ig_video": None,
-                        "_ig_image": display_url,
-                    }
-    except Exception:
-        pass
+            if not media:
+                continue
+            title = media.get("accessibility_caption", "Instagram") or "Instagram"
+            vid_url = media.get("video_url")
+            if not vid_url and "video_versions" in media:
+                versions = media["video_versions"]
+                if versions:
+                    vid_url = versions[0].get("url")
+            img_url = media.get("display_url")
+            if not img_url and "image_versions2" in media:
+                candidates = media["image_versions2"].get("candidates", [])
+                if candidates:
+                    img_url = candidates[0].get("url")
+            if vid_url:
+                return {
+                    "title": title[:100],
+                    "duration": media.get("video_duration"),
+                    "thumbnail": img_url,
+                    "filesize": None,
+                    "platform": "instagram",
+                    "url": url,
+                    "_ig_video": vid_url,
+                    "_ig_image": None,
+                }
+            if img_url:
+                return {
+                    "title": title[:100],
+                    "duration": None,
+                    "thumbnail": img_url,
+                    "filesize": None,
+                    "platform": "instagram",
+                    "url": url,
+                    "_ig_video": None,
+                    "_ig_image": img_url,
+                }
+        except Exception:
+            continue
 
-    return _get_instagram_info_fallback(url, cookies_dict)
-
-
-def _get_instagram_info_fallback(url: str, cookies_dict: dict) -> dict:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "X-IG-App-ID": "936619743392459",
-    }
-    resp = httpx.get(url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
-    html = resp.text
-
-    vid_match = re.search(r'"video_url"\s*:\s*"([^"]+)"', html)
-    vid_url = vid_match.group(1).replace("\\u002F", "/") if vid_match else None
-    img_match = re.search(r'"display_url"\s*:\s*"([^"]+)"', html)
-    img_url = img_match.group(1).replace("\\u002F", "/") if img_match else None
-    title_match = re.search(r'"accessibility_caption"\s*:\s*"([^"]*)"', html)
-    title = title_match.group(1) if title_match else "Instagram"
-
-    if not vid_url and not img_url:
-        raise Exception("Instagram sent an empty media response. The post may be private or require login.")
-
-    return {
-        "title": title[:100],
-        "duration": None,
-        "thumbnail": img_url,
-        "filesize": None,
-        "platform": "instagram",
-        "url": url,
-        "_ig_video": vid_url,
-        "_ig_image": img_url,
-    }
+    raise Exception("Instagram API returned no media. The post may be private or your cookies may be expired.")
 
 
 def _download_instagram(url: str, cookies_file: str = None) -> tuple[str, str]:
