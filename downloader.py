@@ -131,18 +131,23 @@ def _get_spotify_info(url: str) -> dict:
         }
 
 
+def _load_cookies_content() -> str:
+    return os.getenv("COOKIES_CONTENT", "")
+
+
 def _get_instagram_cookies(cookies_file: str) -> dict:
     cookies_dict = {}
-    content = None
+    content = ""
 
     if cookies_file and os.path.isfile(cookies_file):
         with open(cookies_file, encoding="utf-8", errors="ignore") as f:
             content = f.read()
-    else:
-        logger.warning(f"Cookies file not found: {cookies_file}")
-        return cookies_dict
 
     if not content:
+        content = _load_cookies_content()
+
+    if not content:
+        logger.warning("No cookies available")
         return cookies_dict
 
     for line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
@@ -401,6 +406,11 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
 
     if cookies_file and os.path.isfile(cookies_file):
         cmd += ["--cookies", cookies_file]
+    elif _load_cookies_content():
+        cookies_path = os.path.join(TEMP_DIR, "cookies.txt")
+        with open(cookies_path, "w", encoding="utf-8") as f:
+            f.write(_load_cookies_content())
+        cmd += ["--cookies", cookies_path]
 
     if platform == "youtube":
         cmd += [
