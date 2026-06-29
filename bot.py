@@ -177,6 +177,7 @@ async def handle_message(message: Message):
 
 
 async def main():
+    dp.include_router(router)
     db.init_db()
     logger.info("Bot starting...")
     await dp.start_polling(bot)
