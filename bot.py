@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 import database as db
 import downloader
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -25,9 +28,6 @@ if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
     logger.info(f"Cookies file found: {COOKIES_FILE}")
 else:
     logger.warning(f"Cookies file not found: {COOKIES_FILE}")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
