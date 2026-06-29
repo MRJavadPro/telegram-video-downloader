@@ -56,6 +56,12 @@ def get_info(url: str, cookies_file: str = None) -> dict:
     if platform == "pinterest":
         return _get_pinterest_info(url)
 
+    if platform == "instagram":
+        try:
+            return _get_instagram_info(url, cookies_file)
+        except Exception:
+            pass
+
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-download",
@@ -125,6 +131,85 @@ def _get_spotify_info(url: str) -> dict:
         }
 
 
+def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
+    cookies_dict = {}
+    if cookies_file and os.path.isfile(cookies_file):
+        with open(cookies_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 7 and "instagram.com" in parts[0]:
+                    cookies_dict[parts[5]] = parts[6]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
+    resp = httpx.get(url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
+    html = resp.text
+
+    vid_match = re.search(r'"video_url"\s*:\s*"([^"]+)"', html)
+    vid_url = vid_match.group(1).replace("\\u002F", "/") if vid_match else None
+
+    title_match = re.search(r'"accessibility_caption"\s*:\s*"([^"]*)"', html)
+    title = title_match.group(1) if title_match else "Instagram Reel"
+
+    img_match = re.search(r'"display_url"\s*:\s*"([^"]+)"', html)
+    img_url = img_match.group(1).replace("\\u002F", "/") if img_match else None
+
+    return {
+        "title": title[:100] if title else "Instagram Reel",
+        "duration": None,
+        "thumbnail": img_url,
+        "filesize": None,
+        "platform": "instagram",
+        "url": url,
+        "_ig_video": vid_url,
+        "_ig_image": img_url,
+    }
+
+
+def _download_instagram(url: str, cookies_file: str = None) -> tuple[str, str]:
+    info = _get_instagram_info(url, cookies_file)
+    vid_url = info.get("_ig_video")
+    img_url = info.get("_ig_image")
+
+    cookies_dict = {}
+    if cookies_file and os.path.isfile(cookies_file):
+        with open(cookies_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 7 and "instagram.com" in parts[0]:
+                    cookies_dict[parts[5]] = parts[6]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    }
+
+    if vid_url:
+        resp = httpx.get(vid_url, headers=headers, cookies=cookies_dict, timeout=60, follow_redirects=True)
+        filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.mp4")
+        with open(filepath, "wb") as f:
+            f.write(resp.content)
+        return filepath, ".mp4"
+
+    if img_url:
+        resp = httpx.get(img_url, headers=headers, cookies=cookies_dict, timeout=30, follow_redirects=True)
+        filepath = os.path.join(TEMP_DIR, f"instagram_{os.urandom(4).hex()}.jpg")
+        with open(filepath, "wb") as f:
+            f.write(resp.content)
+        return filepath, ".jpg"
+
+    raise Exception("No downloadable content found on Instagram")
+
+
 def _resolve_pinterest_url(url: str) -> str:
     if "pin.it" in url:
         resp = httpx.get(url, follow_redirects=True, timeout=15)
@@ -183,6 +268,12 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
     if platform == "pinterest":
         return _download_pinterest(url)
 
+    if platform == "instagram":
+        try:
+            return _download_instagram(url, cookies_file)
+        except Exception:
+            pass
+
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-warnings",
@@ -199,12 +290,10 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
             "-f", "best",
             "--merge-output-format", "mp4",
         ]
-    elif platform == "instagram":
-        cmd += ["-f", "best"]
-    elif platform == "pinterest":
-        cmd += ["-f", "best"]
     elif platform == "soundcloud":
         cmd += ["-f", "bestaudio/best", "--audio-format", "mp3"]
+    else:
+        cmd += ["-f", "best"]
 
     cmd.append(url)
 
