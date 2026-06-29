@@ -160,15 +160,70 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
     if not shortcode:
         raise Exception("Cannot extract Instagram shortcode from URL")
 
+    graphql_query = {
+        "variables": json.dumps({"shortcode": shortcode}),
+        "doc_id": "17888483320059182",
+    }
+
     headers = {
         "User-Agent": "Instagram 275.0.0.27.98 (iPhone13,3; iOS 16_6; en_US; en-US; scale=3.00; 1170x2532; 458229258) AppleWebKit/420+",
         "X-IG-App-ID": "936619743392459",
+        "Content-Type": "application/x-www-form-urlencoded",
     }
+
+    resp = httpx.post(
+        "https://www.instagram.com/graphql/query/",
+        headers=headers,
+        cookies=cookies_dict,
+        data=graphql_query,
+        timeout=20,
+        follow_redirects=True,
+    )
+
+    if resp.status_code == 200:
+        try:
+            data = resp.json()
+            media = data.get("data", {}).get("shortcode_media") or data.get("data", {}).get("xdt_shortcode_media")
+            if media:
+                title = media.get("accessibility_caption", "Instagram") or "Instagram"
+                vid_url = media.get("video_url")
+                if not vid_url and "video_versions" in media:
+                    versions = media["video_versions"]
+                    if versions:
+                        vid_url = versions[0].get("url")
+                img_url = media.get("display_url")
+                if not img_url and "image_versions2" in media:
+                    candidates = media["image_versions2"].get("candidates", [])
+                    if candidates:
+                        img_url = candidates[0].get("url")
+                if vid_url:
+                    return {
+                        "title": title[:100],
+                        "duration": media.get("video_duration"),
+                        "thumbnail": img_url,
+                        "filesize": None,
+                        "platform": "instagram",
+                        "url": url,
+                        "_ig_video": vid_url,
+                        "_ig_image": None,
+                    }
+                if img_url:
+                    return {
+                        "title": title[:100],
+                        "duration": None,
+                        "thumbnail": img_url,
+                        "filesize": None,
+                        "platform": "instagram",
+                        "url": url,
+                        "_ig_video": None,
+                        "_ig_image": img_url,
+                    }
+        except Exception:
+            pass
 
     for api_url in [
         f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis",
         f"https://www.instagram.com/p/{shortcode}/?__a=1",
-        f"https://i.instagram.com/api/v1/media/{shortcode}/info/",
     ]:
         try:
             resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
@@ -218,7 +273,7 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
         except Exception:
             continue
 
-    raise Exception("Instagram API returned no media. The post may be private or your cookies may be expired.")
+    raise Exception("Instagram returned no media. Cookies may be expired — re-export from browser.")
 
 
 def _download_instagram(url: str, cookies_file: str = None) -> tuple[str, str]:
