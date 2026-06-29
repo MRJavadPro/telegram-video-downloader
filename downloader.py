@@ -131,7 +131,7 @@ def _get_spotify_info(url: str) -> dict:
         }
 
 
-def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
+def _get_instagram_cookies(cookies_file: str) -> dict:
     cookies_dict = {}
     if cookies_file and os.path.isfile(cookies_file):
         with open(cookies_file) as f:
@@ -142,27 +142,88 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
                 parts = line.split("\t")
                 if len(parts) >= 7 and "instagram.com" in parts[0]:
                     cookies_dict[parts[5]] = parts[6]
+    return cookies_dict
+
+
+def _extract_instagram_shortcode(url: str) -> str:
+    url = url.rstrip("/")
+    match = re.search(r'/(p|reel|tv)/([A-Za-z0-9_-]+)', url)
+    if match:
+        return match.group(2)
+    match = re.search(r'/stories/[^/]+/(\d+)', url)
+    if match:
+        return match.group(1)
+    return ""
+
+
+def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
+    cookies_dict = _get_instagram_cookies(cookies_file)
+    shortcode = _extract_instagram_shortcode(url)
+
+    if not shortcode:
+        raise Exception("Cannot extract Instagram shortcode from URL")
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        "User-Agent": "Instagram 219.0.0.12.117 (Android; 12; SM-G991B; 330; en_US; 533455358; 161343606)",
+        "X-IG-App-ID": "936619743392459",
     }
 
+    api_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
+    resp = httpx.get(api_url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
+
+    if resp.status_code == 200:
+        try:
+            data = resp.json()
+            media = data.get("graphql", {}).get("shortcode_media") or data.get("items", [{}])[0] if data.get("items") else data.get("graphql", {}).get("shortcode_media", {})
+            title = media.get("accessibility_caption", "Instagram") or "Instagram"
+            if media.get("video_url"):
+                return {
+                    "title": title[:100],
+                    "duration": media.get("video_duration"),
+                    "thumbnail": media.get("thumbnail_src"),
+                    "filesize": None,
+                    "platform": "instagram",
+                    "url": url,
+                    "_ig_video": media["video_url"],
+                    "_ig_image": None,
+                }
+            elif media.get("display_url"):
+                return {
+                    "title": title[:100],
+                    "duration": None,
+                    "thumbnail": media.get("thumbnail_src"),
+                    "filesize": None,
+                    "platform": "instagram",
+                    "url": url,
+                    "_ig_video": None,
+                    "_ig_image": media["display_url"],
+                }
+        except Exception:
+            pass
+
+    return _get_instagram_info_fallback(url, cookies_dict)
+
+
+def _get_instagram_info_fallback(url: str, cookies_dict: dict) -> dict:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "X-IG-App-ID": "936619743392459",
+    }
     resp = httpx.get(url, headers=headers, cookies=cookies_dict, timeout=20, follow_redirects=True)
     html = resp.text
 
     vid_match = re.search(r'"video_url"\s*:\s*"([^"]+)"', html)
     vid_url = vid_match.group(1).replace("\\u002F", "/") if vid_match else None
-
-    title_match = re.search(r'"accessibility_caption"\s*:\s*"([^"]*)"', html)
-    title = title_match.group(1) if title_match else "Instagram Reel"
-
     img_match = re.search(r'"display_url"\s*:\s*"([^"]+)"', html)
     img_url = img_match.group(1).replace("\\u002F", "/") if img_match else None
+    title_match = re.search(r'"accessibility_caption"\s*:\s*"([^"]*)"', html)
+    title = title_match.group(1) if title_match else "Instagram"
+
+    if not vid_url and not img_url:
+        raise Exception("Instagram sent an empty media response. The post may be private or require login.")
 
     return {
-        "title": title[:100] if title else "Instagram Reel",
+        "title": title[:100],
         "duration": None,
         "thumbnail": img_url,
         "filesize": None,
@@ -178,19 +239,10 @@ def _download_instagram(url: str, cookies_file: str = None) -> tuple[str, str]:
     vid_url = info.get("_ig_video")
     img_url = info.get("_ig_image")
 
-    cookies_dict = {}
-    if cookies_file and os.path.isfile(cookies_file):
-        with open(cookies_file) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("\t")
-                if len(parts) >= 7 and "instagram.com" in parts[0]:
-                    cookies_dict[parts[5]] = parts[6]
-
+    cookies_dict = _get_instagram_cookies(cookies_file)
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "User-Agent": "Instagram 219.0.0.12.117 (Android; 12; SM-G991B; 330; en_US; 533455358; 161343606)",
+        "X-IG-App-ID": "936619743392459",
     }
 
     if vid_url:
