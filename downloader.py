@@ -136,18 +136,16 @@ def _get_instagram_cookies(cookies_file: str) -> dict:
     content = None
 
     if cookies_file and os.path.isfile(cookies_file):
-        with open(cookies_file) as f:
+        with open(cookies_file, encoding="utf-8", errors="ignore") as f:
             content = f.read()
-    elif cookies_file and not os.path.isfile(cookies_file):
-        logger.warning(f"Cookies file not found: {cookies_file}")
-        return cookies_dict
     else:
+        logger.warning(f"Cookies file not found: {cookies_file}")
         return cookies_dict
 
     if not content:
         return cookies_dict
 
-    for line in content.splitlines():
+    for line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -248,7 +246,12 @@ def _get_instagram_info(url: str, cookies_file: str = None) -> dict:
             logger.info(f"Instagram API {api_url}: status {resp.status_code}")
             if resp.status_code != 200:
                 continue
-            data = resp.json()
+            try:
+                data = resp.json()
+                logger.info(f"Instagram API keys: {list(data.keys())[:5]}")
+            except Exception as e:
+                logger.warning(f"Instagram API not JSON: {e}")
+                continue
             media = None
             if "graphql" in data:
                 media = data["graphql"].get("shortcode_media")

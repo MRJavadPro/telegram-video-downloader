@@ -29,10 +29,13 @@ if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
     logger.info(f"Cookies file found: {COOKIES_FILE}")
 elif COOKIES_CONTENT:
     cookies_path = os.path.join(os.path.dirname(__file__), "cookies.txt")
-    with open(cookies_path, "w") as f:
-        f.write(COOKIES_CONTENT)
+    content = COOKIES_CONTENT.replace("\\n", "\n")
+    with open(cookies_path, "w", encoding="utf-8") as f:
+        f.write(content)
     COOKIES_FILE = cookies_path
-    logger.info(f"Cookies written from env var to: {COOKIES_FILE}")
+    ig_count = sum(1 for line in content.split("\n") if "instagram.com" in line and not line.startswith("#"))
+    yt_count = sum(1 for line in content.split("\n") if "youtube.com" in line and not line.startswith("#"))
+    logger.info(f"Cookies written from env: {ig_count} instagram, {yt_count} youtube, path={COOKIES_FILE}")
 else:
     logger.warning("No cookies configured")
 
