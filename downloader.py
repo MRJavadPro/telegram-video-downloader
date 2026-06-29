@@ -59,10 +59,8 @@ def get_info(url: str, cookies_file: str = None) -> dict:
         "--print-json",
         "--no-warnings",
         "--no-playlist",
+        "-f", "best",
     ]
-
-    if platform == "youtube":
-        cmd += ["--extractor-args", "youtube:player_client=ios,web,mweb"]
 
     if cookies_file:
         cmd += ["--cookies", cookies_file]
@@ -142,7 +140,7 @@ def download(url: str, cookies_file: str = None, max_height: int = 1080) -> tupl
     if platform == "youtube":
         cmd += [
             "--extractor-args", "youtube:player_client=ios,web,mweb",
-            "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-f", "bestvideo[height<=1080]+bestaudio/best",
             "--merge-output-format", "mp4",
         ]
     elif platform == "instagram":
